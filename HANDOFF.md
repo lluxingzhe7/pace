@@ -1372,5 +1372,6 @@ W1 节奏骑 21.5 km + 百公里长距离 40.5 km；W13 减量周 60 km（比峰
   所以 `dist/pace-src-YYYYMMDD.zip` 目前是手动拖进 Release 页面。
 - 第一版 tag：`v0.1`（对应「爬坡按等级筛选 + 教练骑行目标细分」这一版）。
 - **发版自动化**：`.github/workflows/release.yml` —— 推 `v*` 标签后 GitHub Actions 自动建 Release 并挂 `pace-<tag>-src.zip`，不用再手动拖附件（v0.1 是手动建的）。
+- v0.1 Release 已发布：<https://github.com/lluxingzhe7/pace/releases/tag/v0.1>（附件 `pace-v0.1-src.zip`，SHA256 `d5560772…cea4`，105 个条目）。
 
 
