@@ -1,0 +1,30 @@
+name: release
+# 推 v* 标签时自动建 Release，并把源码 zip 作为附件 —— 不用手动拖
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 打源码包（不含个人数据，.gitignore 已排除）
+        run: |
+          git archive --format=zip --prefix="pace-${GITHUB_REF_NAME}/" \
+            -o "pace-${GITHUB_REF_NAME}-src.zip" HEAD
+          ls -lh *.zip
+
+      - name: 建 Release + 上传附件
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pace-*-src.zip
+          generate_release_notes: true
+          name: PACE ${GITHUB_REF_NAME}
+          draft: false
