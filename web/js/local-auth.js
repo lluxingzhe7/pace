@@ -119,6 +119,14 @@
       const { salt, hash } = await hashPassword(password);
       const rec = { username, email: String(data.email || '').trim(), salt, hash, created: Date.now() };
       await users.put(rec);
+      // 兼容旧版本：没有账号时的数据存在 kv:db，第一次注册就把它搬进这个账号
+      try {
+        const legacy = await tx(STORE_KV, 'readonly', s => s.get('db'));
+        if (legacy && legacy.byteLength) {
+          await tx(STORE_KV, 'readwrite', s => s.put(legacy, 'db:' + username));
+          await tx(STORE_KV, 'readwrite', s => s.delete('db'));
+        }
+      } catch (err) { /* 没旧数据就算了 */ }
       setSession(username, 60);
       return jsonResponse(200, { user: publicUser(rec), expires_at: Date.now() + 60 * 86400000 });
     }
