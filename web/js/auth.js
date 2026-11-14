@@ -226,6 +226,8 @@
   }
 
   async function boot() {
+    // 纯前端模式没有账号系统：数据就在这台设备的浏览器里
+    if (window.PACE_STATIC) return true;
     try {
       state.status = await api.authStatus();
     } catch (err) {

@@ -199,6 +199,15 @@
   }
 
   async function boot() {
+    // 纯前端模式：先把浏览器里的 Python 引擎拉起来
+    if (window.PaceWeb && PaceWeb.enabled()) {
+      try {
+        await PaceWeb.boot();
+      } catch (err) {
+        console.error(err);
+        return;
+      }
+    }
     UI.registerGlobalHandlers();
     UI.Importer.init();
     Icon.hydrate(document);

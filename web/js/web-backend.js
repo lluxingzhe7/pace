@@ -1,0 +1,208 @@
+/* 纯前端模式：用 Pyodide 在浏览器里跑 PACE 的 Python 引擎。
+ *
+ * 思路：server.py 的接口逻辑原样复用（pace/webbridge.py 造一个假连接），
+ * 这里只做三件事：
+ *   1. 启动 Pyodide、解包 pace.zip、从 IndexedDB 恢复数据库；
+ *   2. 把 window.fetch 的 /api/* 请求转给 Python；
+ *   3. 写操作之后把 SQLite 文件存回 IndexedDB。
+ */
+(function () {
+  const PYODIDE_CDN = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
+  const state = { py: null, ready: false, booting: null, db: null };
+  // 先抓住原始 fetch，免得被后面的 shim 换掉后自己调不到
+  const rawFetch = window.fetch.bind(window);
+
+  function enabled() {
+    return !!window.PACE_STATIC;
+  }
+
+  /* ------------------------------------------------------------ IndexedDB */
+
+  function idb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('pace-web', 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function idbGet(key) {
+    const db = await idb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('kv', 'readonly');
+      const req = tx.objectStore('kv').get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function idbSet(key, value) {
+    const db = await idb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('kv', 'readwrite');
+      tx.objectStore('kv').put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  /* ------------------------------------------------------------ 小工具 */
+
+  function b64ToBytes(b64) {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function bytesToB64(buf) {
+    const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    let bin = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(bin);
+  }
+
+  function overlay(text) {
+    let el = document.getElementById('pyBoot');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'pyBoot';
+      el.className = 'py-boot';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '<div class="py-boot-card">' +
+      '<div class="py-boot-spin"></div>' +
+      '<b>正在加载分析引擎</b>' +
+      '<span>' + (text || '首次打开要下载约 10 MB，之后会缓存') + '</span></div>';
+    el.hidden = false;
+  }
+
+  function hideOverlay() {
+    const el = document.getElementById('pyBoot');
+    if (el) el.hidden = true;
+  }
+
+  /* ------------------------------------------------------------ 启动 */
+
+  async function ensurePyodide() {
+    if (window.loadPyodide) return;
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = PYODIDE_CDN + 'pyodide.js';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Pyodide 脚本加载失败（网络？）'));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function boot() {
+    if (!enabled()) return false;
+    if (state.ready) return true;
+    if (state.booting) return state.booting;
+    state.booting = (async () => {
+      overlay('准备运行时…');
+      await ensurePyodide();
+      const py = await window.loadPyodide({ indexURL: PYODIDE_CDN });
+      // sqlite3 在 Pyodide 里是「未内置」的包，要显式加载
+      overlay('加载数据库引擎…');
+      await py.loadPackage(['sqlite3']);
+      state.py = py;
+      overlay('解包引擎…');
+      const zipResp = await rawFetch('py/pace.zip', { cache: 'no-cache' });
+      if (!zipResp.ok) throw new Error('pace.zip 下载失败: ' + zipResp.status);
+      const zip = new Uint8Array(await zipResp.arrayBuffer());
+      // 用 Python 自己的 zipfile 解包，比 JS 的 unpackArchive 稳
+      py.FS.writeFile('/tmp/pace.zip', zip);
+      py.runPython("import zipfile; zipfile.ZipFile('/tmp/pace.zip').extractall('/home/pyodide')");
+      window.__py = py;
+
+      overlay('恢复本地数据…');
+      py.runPython("import os\nos.makedirs('/data', exist_ok=True)");
+      const saved = await idbGet('db');
+      if (saved && saved.byteLength) {
+        py.FS.writeFile('/data/pace.db', new Uint8Array(saved));
+      }
+      const info = py.runPython(
+        "import json\nfrom pace import webbridge\njson.dumps(webbridge.init('/data/pace.db'))");
+      state.db = JSON.parse(info);
+      installFetchShim();
+      state.ready = true;
+      hideOverlay();
+      window.dispatchEvent(new CustomEvent('pace:backend-ready'));
+      return true;
+    })().catch((err) => {
+      state.booting = null;
+      overlay('加载失败：' + err.message);
+      throw err;
+    });
+    return state.booting;
+  }
+
+  /* ------------------------------------------------------------ 请求转发 */
+
+  function pyCall(method, path, bodyB64, headers) {
+    const py = state.py;
+    py.globals.set('__m', method);
+    py.globals.set('__p', path);
+    py.globals.set('__b', bodyB64 || '');
+    py.globals.set('__h', py.toPy(headers || {}));
+    const out = py.runPython(
+      "import json\nfrom pace import webbridge\njson.dumps(webbridge.handle(__m, __p, __b, __h))");
+    return JSON.parse(out);
+  }
+
+  async function persist(result) {
+    if (!result.db_b64) return;
+    try {
+      const bytes = b64ToBytes(result.db_b64);
+      await idbSet('db', bytes.buffer);
+    } catch (err) {
+      console.error('保存数据库失败', err);
+    }
+  }
+
+  function installFetchShim() {
+    if (window.__paceFetchRaw) return;              // 只装一次
+    window.__paceFetchRaw = rawFetch;
+    window.fetch = async function (input, init) {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (url.indexOf('/api/') !== 0) return raw(input, init);
+      const method = ((init && init.method) || 'GET').toUpperCase();
+      const headers = Object.assign({}, (init && init.headers) || {});
+      let bodyB64 = '';
+      if (init && init.body != null) {
+        if (typeof init.body === 'string') bodyB64 = bytesToB64(new TextEncoder().encode(init.body));
+        else if (init.body instanceof ArrayBuffer) bodyB64 = bytesToB64(init.body);
+        else if (ArrayBuffer.isView(init.body)) bodyB64 = bytesToB64(init.body.buffer);
+        else bodyB64 = bytesToB64(new TextEncoder().encode(String(init.body)));
+      }
+      const result = pyCall(method, url, bodyB64, headers);
+      if (result.db_b64) persist(result);
+      const bytes = b64ToBytes(result.body_b64 || '');
+      const respHeaders = new Headers();
+      (result.headers || []).forEach(([k, v]) => {
+        if (/^content-(type|encoding)$/i.test(k)) respHeaders.set(k, v);
+      });
+      return new Response(bytes, { status: result.status, headers: respHeaders });
+    };
+  }
+
+  window.PaceWeb = {
+    enabled,
+    boot,
+    ready: () => state.ready,
+    get: idbGet,
+    set: idbSet,
+    reset: async () => {
+      await idbSet('db', new ArrayBuffer(0));
+      location.reload();
+    },
+  };
+})();

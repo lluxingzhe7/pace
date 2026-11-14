@@ -1394,6 +1394,19 @@ body.rb-locked { overflow: hidden; }
 .rb-climb-tr { cursor: pointer; }
 .rb-climb-tr:hover td { background: var(--bg-elev-2); }
 
+/* 纯前端模式的启动遮罩 */
+.py-boot { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center;
+  background: rgba(8, 13, 22, .92); backdrop-filter: blur(6px); }
+.py-boot[hidden] { display: none; }
+.py-boot-card { display: flex; flex-direction: column; align-items: center; gap: 10px;
+  color: #dbe4f3; font-size: 13px; text-align: center; padding: 24px; }
+.py-boot-card b { font-size: 15px; }
+.py-boot-card span { color: #8fa0bb; font-size: 12.5px; }
+.py-boot-spin { width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.15); border-top-color: #ff7a3d;
+  animation: py-spin 0.9s linear infinite; }
+@keyframes py-spin { to { transform: rotate(360deg); } }
+
 /* ── 账号页（登录 / 注册 / 找回密码）──────────────────────── */
 .auth-gate { position: fixed; inset: 0; z-index: 1000; background: #f6f7fb; font-size: 15px; }
 .auth-gate[hidden] { display: none; }

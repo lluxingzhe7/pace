@@ -21,7 +21,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import analysis, analytics, geo, parsers, routebook
-from . import mail as mailer
 from .auth import AuthError, AuthStore
 from .coach import evaluate as coach_evaluate
 from .coach import plan as coach_plan
@@ -477,6 +476,7 @@ def make_handler(app: App):
                 user = auth.user_by_email(email) if email else None
                 mail_sent = False
                 dev_code = None
+                from . import mail as mailer
                 if user:
                     code = auth.create_reset(user["id"], email)
                     try:
@@ -499,6 +499,7 @@ def make_handler(app: App):
                 return self.send_json({"ok": True, "user": user})
 
             if path == "/api/auth/smtp":
+                from . import mail as mailer
                 user = auth.session_user(self._auth_token())
                 if not user or user["role"] != "owner":
                     raise ApiError("只有站长能改发信配置", 403)
