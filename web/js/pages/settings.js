@@ -52,6 +52,7 @@
     const h = state.health || {};
     const smtp = state.smtp || {};
     const isOwner = (window.PaceUser || {}).role === 'owner';
+    const isStatic = !!window.PACE_STATIC;
     host.innerHTML = `
       <div class="section-head" style="margin-top:0">
         <h2>设置</h2>
@@ -218,12 +219,18 @@
           <div class="card-head"><h3>数据</h3><span class="dim">${h.activities || 0} 条活动</span></div>
           <div class="card-body">
             <div class="row wrap" style="gap:8px">
-              <a class="btn" href="/api/activities?limit=500" download="pace-activities.json">${Icon.get('download')}导出活动 JSON</a>
+              ${isStatic
+                ? `<button class="btn" id="btnExportJson">${Icon.get('download')}导出活动 JSON</button>`
+                : `<a class="btn" href="/api/activities?limit=500" download="pace-activities.json">${Icon.get('download')}导出活动 JSON</a>`}
               <button class="btn" id="btnRecompute">${Icon.get('spark')}重算全部指标</button>
               <button class="btn" onclick="UI.Importer.open()">${Icon.get('upload')}导入更多</button>
+              ${isStatic ? `<button class="btn" id="btnExportDb">导出数据包</button>
+              <label class="btn" style="margin:0">导入数据包<input id="fileImportDb" type="file" accept=".db" hidden></label>` : ''}
             </div>
             <p class="tiny dim" style="margin-top:12px;line-height:1.7">
-              数据库位置：<code>data/pace.db</code>（SQLite）。直接备份这个文件即可。
+              ${isStatic
+                ? '数据存在这个浏览器里（IndexedDB）。换设备 / 清站点数据会丢，建议定期「导出数据包」。'
+                : '数据库位置：<code>data/pace.db</code>（SQLite）。直接备份这个文件即可。'}
               所有分析都在本机完成，不会上传任何数据。
             </p>
           </div>
@@ -514,6 +521,45 @@
       });
     }
 
+  function wireStaticBackup() {
+    const expDb = document.getElementById('btnExportDb');
+    if (expDb) {
+      expDb.addEventListener('click', async () => {
+        const buf = await window.PaceWeb.get('db');
+        if (!buf || !buf.byteLength) { UI.toast('还没有数据可以导出', 'err'); return; }
+        const blob = new Blob([buf], { type: 'application/x-sqlite3' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'pace-backup-' + new Date().toISOString().slice(0, 10) + '.db';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        UI.toast('数据包已导出', 'ok');
+      });
+    }
+    const fileDb = document.getElementById('fileImportDb');
+    if (fileDb) {
+      fileDb.addEventListener('change', async (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        await window.PaceWeb.set('db', await f.arrayBuffer());
+        UI.toast('数据包已导入，正在重启…', 'ok');
+        setTimeout(() => location.reload(), 900);
+      });
+    }
+    const expJson = document.getElementById('btnExportJson');
+    if (expJson) {
+      expJson.addEventListener('click', async () => {
+        const data = await api.activities({ limit: 500 });
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'pace-activities.json';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      });
+    }
+  }
+
   async function load(root) {
     host = root;
     root.innerHTML = UI.spinner('读取设置…');
@@ -528,6 +574,7 @@
       state.smtp = smtp || null;
       if (state.settings.theme) document.documentElement.dataset.theme = state.settings.theme;
       render();
+      if (window.PACE_STATIC) wireStaticBackup();
     } catch (err) {
       root.innerHTML = `<div class="card">${UI.empty('info', '加载失败', U.esc(err.message))}</div>`;
     }

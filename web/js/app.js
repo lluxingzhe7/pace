@@ -213,6 +213,7 @@
     Icon.hydrate(document);
     syncSportSwitch();
 
+    if (window.PACE_STATIC) document.body.classList.add('static-mode');
     // 没登录就只显示门禁，别初始化任何页面
     if (window.Auth) {
       const ready = await Auth.boot();

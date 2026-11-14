@@ -1394,6 +1394,10 @@ body.rb-locked { overflow: hidden; }
 .rb-climb-tr { cursor: pointer; }
 .rb-climb-tr:hover td { background: var(--bg-elev-2); }
 
+/* 纯前端模式：没有服务器的入口直接藏起来 */
+body.static-mode .nav a[data-nav="devices"] { display: none; }
+body.static-mode .nav-sub { display: flex; }
+
 /* 纯前端模式的启动遮罩 */
 .py-boot { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center;
   background: rgba(8, 13, 22, .92); backdrop-filter: blur(6px); }

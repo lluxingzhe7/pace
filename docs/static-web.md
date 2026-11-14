@@ -13,17 +13,26 @@
 
 ## 已验证 / 未验证
 
-**已验证**
-- `pace/webbridge.py` 在 CPython 里跑通全部接口：health / meta / dashboard / activities / import（导入 sample GPX 后 total=1）
-- 浏览器里引擎能启动：Pyodide 加载 → 解包 → sqlite3 包 → 页面读数（侧栏出现「0 条活动 · v1.1.0」说明接口走通了 Python）
-- 写操作会把 SQLite 存回 IndexedDB（`webbridge.dump_db` → base64）
+**已验证（2026-11-14，无头 Edge 实测）**
+- 引擎启动：Pyodide → 解包 `pace.zip` → 加载 sqlite3 → 页面可用
+- 导入：浏览器里造一个 900 点的 GPX，`api.importFiles` 返回 `status=ok, 10.5 km, has_hr=true`
+- 仪表盘：导入后刷新页面，侧栏「1 条活动 · v1.1.0」、仪表盘 6 张卡片、PR 表都有数据
+- **持久化**：刷新页面后活动还在（说明 IndexedDB → SQLite 恢复链路通了）
+- 设置页：纯前端模式出现「导出数据包 / 导入数据包」，数据源入口自动隐藏
+- 后端回归：auth 62 / selftest 79 / routebook 83 全绿
 
-**未验证 / 未完成**
-- 首次加载在慢网络下要 30–60 秒（Pyodide 体积决定）
-- 还没做整页回归：导入 → 详情 → 教练 → 路书 的逐页点测
-- 账号系统在纯前端版里是关闭的（数据只在本机浏览器）
-- 依赖服务器的功能不可用：数据源同步、Strava OAuth、LLM 教练（会报错，但页面还在）
+**未完成 / 限制**
+- 首次加载慢：Pyodide + sqlite3 约 10 MB，冷启动 30–70 秒（之后 Service Worker 缓存）
+- 没有逐页回归完：活动详情、教练、路书编辑器还没逐页点测
+- 账号系统在纯前端模式关闭（数据只在本机浏览器）
+- 依赖服务器的功能不可用：数据源同步、Strava OAuth、LLM 教练（入口已隐藏/会报错）
+- 多设备不同步；清站点数据会丢，用「导出数据包」备份
 - GitHub Pages 在国内访问速度和稳定性一般
+
+## 为什么打开是 404
+
+GitHub Pages 还没启用，`pages` 工作流跑过但失败了（`conclusion=failure`）。
+去仓库 **Settings → Pages → Build and deployment → Source = GitHub Actions**，再点 Re-run 那个工作流（或随便改个文件推一次）。
 
 ## 本机怎么试
 

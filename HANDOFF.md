@@ -1371,6 +1371,38 @@ W1 节奏骑 21.5 km + 百公里长距离 40.5 km；W13 减量周 60 km（比峰
 - GitHub Release 的 zip 需要 API token 才能自动上传（SSH 只能推 git 对象），
   所以 `dist/pace-src-YYYYMMDD.zip` 目前是手动拖进 Release 页面。
 - 第一版 tag：`v0.1`（对应「爬坡按等级筛选 + 教练骑行目标细分」这一版）。
+
+---
+
+## 三十八、纯前端版（GitHub Pages，2026-11-14 晚）
+
+用户要「手机能打开、不买服务器、电脑不用开」，做法不是重写后端，而是把 Python 搬进浏览器。
+
+### 架构
+
+- **Pyodide** 在浏览器里跑 CPython，加载 `web/py/pace.zip`（由 `tools/build_web_bundle.py` 打包）。
+- `pace/webbridge.py`：不监听端口，造一个假连接把请求直接喂给现有 `server.py` 的 Handler，
+  截下状态码/响应头/响应体 → 40+ 接口**零改写**复用。
+- `web/js/web-backend.js`：加载 Pyodide + `sqlite3` 包、从 IndexedDB 恢复数据库、
+  拦截 `fetch('/api/*')` 转给 Python、写操作后把整库快照存回 IndexedDB。
+- 静态模式识别：`github.io` 域名或 `?static=1`；此时账号门禁跳过（数据只在本机浏览器）。
+- `sw.js` 缓存应用壳与 `pace.zip`；`.github/workflows/pages.yml` 推 main 自动部署。
+
+### 实测（2026-11-14）
+
+- 900 点 GPX 在浏览器里导入成功：10.5 km / has_hr=true
+- 刷新后数据仍在（IndexedDB → SQLite 恢复）
+- 仪表盘 6 张卡片、PR 表正常渲染，截图 `.ui/422-static-persist2.png`
+- 设置页出现「导出数据包 / 导入数据包」，数据源入口自动隐藏
+- 后端回归 auth 62 / selftest 79 / routebook 83 全绿
+
+### 已知问题
+
+- 首次加载 30–70 秒（Pyodide ~10MB），之后靠 SW 缓存
+- 活动详情 / 教练 / 路书编辑器尚未逐页回归
+- 数据源同步、Strava、LLM 在纯前端模式不可用（已隐藏/报错）
+- GitHub Pages 默认没开，需要站长在 Settings → Pages 里把 Source 选成 GitHub Actions
+
 - **发版自动化**：`.github/workflows/release.yml` —— 推 `v*` 标签后 GitHub Actions 自动建 Release 并挂 `pace-<tag>-src.zip`，不用再手动拖附件（v0.1 是手动建的）。
 - v0.1 Release 已发布：<https://github.com/lluxingzhe7/pace/releases/tag/v0.1>（附件 `pace-v0.1-src.zip`，SHA256 `d5560772…cea4`，105 个条目）。
 
