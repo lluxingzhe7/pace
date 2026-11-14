@@ -1,5 +1,8 @@
 # 纯前端版（GitHub Pages，手机直接打开）
 
+**线上地址：<https://lluxingzhe7.github.io/pace/>**（2026-11-14 已部署成功，`pages` 工作流 success）
+
+
 数据存在**浏览器本地**（IndexedDB），没有服务器，电脑不用开。
 引擎是原来的 Python 代码（Pyodide 在浏览器里跑），所以分析/教练/路书逻辑和后端版一致。
 
