@@ -119,14 +119,14 @@
               <li><i class="pt-dot"></i>教练计划、路书规划、爬坡分级</li>
             </ul>
           </div>
-          <div class="auth-art-foot">v1.1 · 数据只存在这台服务器上</div>
+          <div class="auth-art-foot">v1.1 · ${window.PACE_STATIC ? '数据只存在这个浏览器里' : '数据只存在这台服务器上'}</div>
         </aside>
 
         <main class="auth-main">
           <div class="auth-box">
             <h1>${esc(meta.title)}</h1>
             <p class="auth-sub">${esc(meta.sub)}</p>
-            ${s.needs_setup && page === 'register'
+            ${s.needs_setup && s.legacy_pending && page === 'register'
               ? `<p class="auth-hint">这台机器上已有旧数据，创建后会自动迁进这个账号。</p>` : ''}
             ${page === 'register' && s.registration_open === false
               ? `<p class="auth-hint warn">站长关闭了注册，需要账号请找站长开。</p>` : ''}

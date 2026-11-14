@@ -93,11 +93,17 @@
     if (path === '/api/auth/status') {
       const list = await users.all();
       const u = await currentUser();
+      let legacy = false;
+      try {
+        const old = await tx(STORE_KV, 'readonly', s => s.get('db'));
+        legacy = !!(old && old.byteLength);
+      } catch (err) { legacy = false; }
       return jsonResponse(200, {
         needs_setup: list.length === 0,
         registration_open: true,
         users_count: list.length,
         user: u,
+        legacy_pending: legacy,
         static_local: true,
       });
     }
