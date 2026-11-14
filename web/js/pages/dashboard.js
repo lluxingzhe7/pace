@@ -7,6 +7,42 @@
     state.charts = [];
   }
 
+  function buildDemoGpx() {
+    const pts = [];
+    const start = Math.floor(Date.now() / 1000) - 3600;
+    for (let i = 0; i < 900; i++) {
+      const t = start + i;
+      const lat = 23.10 + i * 0.00012;
+      const lon = 113.30 + Math.sin(i / 45) * 0.003;
+      const ele = 25 + Math.sin(i / 50) * 18 + i * 0.02;
+      const hr = 128 + Math.round(Math.sin(i / 35) * 22);
+      pts.push('<trkpt lat="' + lat.toFixed(6) + '" lon="' + lon.toFixed(6) + '"><ele>'
+        + ele.toFixed(1) + '</ele><time>' + new Date(t * 1000).toISOString()
+        + '</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:hr>' + hr
+        + '</gpxtpx:hr></gpxtpx:TrackPointExtension></extensions></trkpt>');
+    }
+    return '<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="PACE demo" '
+      + 'xmlns="http://www.topografix.com/GPX/1/1" '
+      + 'xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">'
+      + '<trk><name>示例骑行</name><type>cycling</type><trkseg>' + pts.join('') + '</trkseg></trk></gpx>';
+  }
+
+  async function startDemo() {
+    const btn = document.getElementById('btnDemo');
+    if (btn) { btn.disabled = true; btn.textContent = '正在生成…'; }
+    try {
+      const gpx = buildDemoGpx();
+      const file = new File([gpx], '示例-骑行.gpx', { type: 'application/gpx+xml' });
+      const res = await api.importFiles([file]);
+      const ok = Array.isArray(res) && res.some(r => r.status === 'ok');
+      UI.toast(ok ? '示例数据已导入，正在刷新…' : '示例导入失败', ok ? 'ok' : 'err');
+      if (ok && window.Router) Router.rerender();
+    } catch (err) {
+      UI.toast('生成示例失败：' + err.message, 'err');
+      if (btn) { btn.disabled = false; btn.textContent = '先看示例数据'; }
+    }
+  }
+
   function heroHtml(d) {
     const p = d.period || {};
     const delta = d.delta || {};
@@ -234,16 +270,24 @@
     const empty = !d || !d.activity_count;
     if (empty) {
       root.innerHTML = `
-        <div class="card">${UI.empty('cloud', '欢迎使用 PACE',
-          '这是一个完全本地运行的运动数据仪表盘。导入你的 GPX / FIT / TCX / CSV 文件，开始分析配速、心率、爬升、训练负荷和分段成绩。'
-          + (window.PACE_STATIC
-            ? ' 数据只存在这台设备的浏览器里；想从电脑版搬过来，用「设置 → 导出数据包」，再到手机「设置 → 导入数据包」。'
-            : ' 数据按账号存放；手机版与电脑版不互通，可用「设置 → 导出数据包 / 导入数据包」迁移。'),
-          `<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap;justify-content:center">
-             <button class="btn btn-primary" onclick="UI.Importer.open()">${Icon.get('upload')}导入活动</button>
-             <a class="btn" href="#/settings">导入数据包 / 心率设置</a>
-           </div>`)}
+        <div class="onboard">
+          <div class="onboard-art">${Icon.get('cloud')}</div>
+          <h1>开始你的第一条记录</h1>
+          <p>把码表或手机里的骑行 / 跑步文件导进来，几秒后就能看到配速、心率、爬升与训练负荷。</p>
+          <div class="onboard-actions">
+            <button class="btn btn-primary" onclick="UI.Importer.open()">${Icon.get('upload')}导入活动</button>
+            <button class="btn" id="btnDemo">先看示例数据</button>
+            <a class="btn btn-ghost" href="#/settings">导入数据包</a>
+          </div>
+          <ol class="onboard-steps">
+            <li><b>1 · 导入</b>GPX / FIT / TCX / CSV</li>
+            <li><b>2 · 分析</b>配速、心率区间、训练负荷</li>
+            <li><b>3 · 教练</b>按目标生成训练计划</li>
+          </ol>
+          <p class="onboard-foot">数据只存在这台设备的浏览器里 · 与电脑版不互通，可用「设置 → 导出 / 导入数据包」迁移</p>
         </div>`;
+      const demoBtn = document.getElementById('btnDemo');
+      if (demoBtn) demoBtn.addEventListener('click', startDemo);
       return;
     }
 

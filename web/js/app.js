@@ -216,6 +216,18 @@
         console.error(err);
         return;
       }
+      // 从「分享到 PACE」进来的文件：启动后自动导入
+      try {
+        const shared = await PaceWeb.consumeShared();
+        if (shared && shared.length) {
+          const res = await api.importFiles(shared);
+          const ok = Array.isArray(res) && res.some(r => r.status === 'ok');
+          UI.toast(ok ? '已导入分享过来的 ' + shared.length + ' 个文件'
+                      : '分享的文件解析失败', ok ? 'ok' : 'err', 4000);
+        }
+      } catch (err) {
+        console.error(err);
+      }
       Auth.mountChip();
     }
     UI.registerGlobalHandlers();

@@ -1399,6 +1399,38 @@ body.static-mode .nav a[data-nav="devices"] { display: none; }
 body.static-mode .nav-sub { display: flex; }
 
 /* 纯前端模式的启动遮罩 */
+/* 空状态引导 */
+.onboard { position: relative; overflow: hidden; border-radius: 18px; padding: 30px 22px 26px;
+  background: radial-gradient(120% 120% at 50% -20%, rgba(255,122,61,.22), transparent 60%),
+              radial-gradient(90% 90% at 100% 0%, rgba(90,140,255,.18), transparent 55%),
+              var(--bg-elev-2);
+  border: 1px solid var(--line); text-align: center; }
+.onboard h1 { font-size: 22px; margin: 14px 0 8px; letter-spacing: -.01em; }
+.onboard p { color: var(--text-2); font-size: 13.5px; line-height: 1.8; max-width: 520px;
+  margin: 0 auto; }
+.onboard-art { width: 72px; height: 72px; margin: 0 auto; display: grid; place-items: center;
+  border-radius: 22px; color: #fff;
+  background: linear-gradient(150deg, #ff9a62, #ff5c8a 70%, #7c5cff);
+  box-shadow: 0 18px 34px -18px rgba(255,92,138,.9); }
+.onboard-art svg { width: 38px; height: 38px; }
+.onboard-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+  margin: 20px 0 8px; }
+.onboard-actions .btn { height: 42px; padding: 0 18px; border-radius: 11px; }
+.onboard-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  max-width: 520px; margin: 22px auto 6px; padding: 0; list-style: none; }
+.onboard-steps li { background: rgba(255,255,255,.03); border: 1px solid var(--line);
+  border-radius: 12px; padding: 12px 10px; font-size: 12px; color: var(--text-2); }
+.onboard-steps b { display: block; color: var(--text); font-size: 12.5px; margin-bottom: 4px; }
+.onboard-foot { margin-top: 14px; font-size: 11.5px; color: var(--text-3); line-height: 1.7; }
+@media (max-width: 860px) {
+  .onboard { padding: 26px 16px 22px; border-radius: 16px; }
+  .onboard h1 { font-size: 20px; }
+  .onboard-steps { grid-template-columns: 1fr; gap: 8px; }
+  .onboard-steps li { display: flex; gap: 10px; align-items: center; text-align: left; }
+  .onboard-steps b { display: inline; margin: 0; }
+  .onboard-actions .btn { flex: 1 1 auto; min-width: 140px; }
+}
+
 .py-boot { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center;
   background: rgba(8, 13, 22, .92); backdrop-filter: blur(6px); }
 .py-boot[hidden] { display: none; }
@@ -1526,14 +1558,22 @@ body.auth-locked { overflow: hidden; }
 @media (max-width: 860px) {
   .mobile-tabs {
     display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0;
-    bottom: 0; z-index: 90; background: var(--bg-elev-1, #0f1728);
-    border-top: 1px solid var(--line); padding: 6px 0 calc(6px + env(safe-area-inset-bottom));
+    bottom: 0; z-index: 90; background: rgba(12, 18, 30, .96);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--line); padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
   }
-  .mobile-tabs a { display: flex; flex-direction: column; align-items: center; gap: 2px;
-    font-size: 11px; color: var(--text-3); text-decoration: none; padding: 4px 0; }
+  .mobile-tabs a { display: flex; flex-direction: column; align-items: center; gap: 3px;
+    font-size: 11.5px; color: var(--text-3); text-decoration: none; padding: 6px 0 4px;
+    position: relative; transition: color .15s; }
+  .mobile-tabs a span { width: 22px; height: 22px; display: grid; place-items: center; }
+  .mobile-tabs a span svg { width: 21px; height: 21px; }
+  .mobile-tabs a b { font-weight: 550; letter-spacing: .01em; }
   .mobile-tabs a.active { color: var(--accent-2); }
+  .mobile-tabs a.active::before { content: ''; position: absolute; top: 0; left: 50%;
+    transform: translateX(-50%); width: 22px; height: 3px; border-radius: 0 0 3px 3px;
+    background: var(--accent-2); }
   body.static-mode .mobile-tabs a[data-nav="devices"] { display: none; }
-  #view { padding-bottom: 76px; }
+  #view { padding-bottom: 88px; }
 }
 .rb-climb-filter { margin: 0 16px 12px; flex-wrap: wrap; max-width: calc(100% - 32px); }
 .rb-climb-filter button { font-variant-numeric: tabular-nums; }

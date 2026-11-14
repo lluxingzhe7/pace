@@ -232,9 +232,18 @@
 
   if (enabled()) installFetchShim();
 
+  async function consumeShared() {
+    const items = await idbGet('shared-files');
+    if (!items || !items.length) return [];
+    await idbSet('shared-files', []);
+    return items.map(it => new File([it.data], it.name || 'shared.gpx',
+      { type: it.type || 'application/octet-stream' }));
+  }
+
   window.PaceWeb = {
     enabled,
     boot,
+    consumeShared,
     ready: () => state.ready,
     get: idbGet,
     set: idbSet,
