@@ -1351,3 +1351,25 @@ W1 节奏骑 21.5 km + 百公里长距离 40.5 km；W13 减量周 60 km（比峰
 ① 客运站/院内锚点绕圈：免费 OSM 无解，要么接高德 Web 服务 Key，要么做「一键换路口锚点」；
 ② 等用户对新交互（确认点、爬坡联动、爬坡筛选）的实际反馈。
 
+---
+
+## 三十六、GitHub 部署（2026-11-14 下午）
+
+仓库：<https://github.com/lluxingzhe7/pace>（公开，main）。
+
+- 本机仓库就是工作区根目录，`origin` = `git@github.com:lluxingzhe7/pace.git`。
+- 认证用 SSH 部署密钥：私钥 `.secrets/id_ed25519`（**已在 .gitignore 里，绝不入库**），
+  公钥已加到 GitHub 账号 `lluxingzhe7` 的 `PACE-deploy` 这把 key。
+  仓库里配了 `core.sshCommand` 指向它，所以 `git push` 直接可用。
+- 提交署名：`shitian7 <826393844@qq.com>`（仓库级 user.name/user.email）。
+- 发版一条命令：`bash deploy.sh "本版说明" v0.2`
+  （全量测试不过就中止 → 自动提交 → 打 tag → 推 main 和 tag）。
+- **沙箱限制**：本环境默认禁外网，`git push` 必须以「完全访问（danger-full-access）」
+  执行，每次会弹一次授权。这不是能绕的，也不该绕。
+- `.gitignore` 排除了：`data/`（个人活动库 / strava token / 高德 key）、`.ui/`、
+  `.edge-profile*/`、`gongkao-app/`、`gopro-web/`、`dist/`、`.secrets/`。
+- GitHub Release 的 zip 需要 API token 才能自动上传（SSH 只能推 git 对象），
+  所以 `dist/pace-src-YYYYMMDD.zip` 目前是手动拖进 Release 页面。
+- 第一版 tag：`v0.1`（对应「爬坡按等级筛选 + 教练骑行目标细分」这一版）。
+
+
