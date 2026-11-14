@@ -11,6 +11,8 @@ data/*
 *.log
 server.pid
 .selftest-tmp/
+.auth-test/
+.e2e/
 .coach-test/
 .program-test/
 .routebook-test/

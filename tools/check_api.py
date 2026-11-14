@@ -5,12 +5,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import urllib.error
 import urllib.request
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765"
+AUTH: dict[str, str] = {}
 PASSED = 0
 FAILED: list[str] = []
 
@@ -27,7 +29,8 @@ def check(name, cond, detail=""):
 
 def get(path, timeout=20):
     t0 = time.time()
-    req = urllib.request.Request(BASE + path, headers={"Accept": "application/json"})
+    req = urllib.request.Request(BASE + path,
+                                 headers={"Accept": "application/json", **AUTH})
     # 本机服务不该走系统代理：环境里挂了 Privoxy 时 urlopen 会返回 500
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(req, timeout=timeout) as resp:
@@ -38,26 +41,54 @@ def get(path, timeout=20):
 def post(path, payload, timeout=60):
     data = json.dumps(payload).encode("utf-8") if payload is not None else b""
     req = urllib.request.Request(BASE + path, data=data, method="POST",
-                                 headers={"Content-Type": "application/json; charset=utf-8"})
+                                 headers={"Content-Type": "application/json; charset=utf-8", **AUTH})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(req, timeout=timeout) as resp:
+        _remember_cookie(resp)
         return resp.status, json.loads(resp.read().decode("utf-8"))
 
 
 def put(path, payload, timeout=60):
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(BASE + path, data=data, method="PUT",
-                                 headers={"Content-Type": "application/json; charset=utf-8"})
+                                 headers={"Content-Type": "application/json; charset=utf-8", **AUTH})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(req, timeout=timeout) as resp:
         return resp.status, json.loads(resp.read().decode("utf-8"))
 
 
 def delete(path, timeout=20):
-    req = urllib.request.Request(BASE + path, method="DELETE")
+    req = urllib.request.Request(BASE + path, method="DELETE", headers=dict(AUTH))
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(req, timeout=timeout) as resp:
         return resp.status, json.loads(resp.read().decode("utf-8"))
+
+
+def _remember_cookie(resp):
+    for header in resp.headers.get_all("Set-Cookie") or []:
+        if header.startswith("pace_session="):
+            AUTH["Cookie"] = header.split(";", 1)[0]
+
+
+def login_for_tests():
+    """用测试账号登录；没有就先注册（注册关了就设 PACE_TEST_USER/PASS）。"""
+    user = os.environ.get("PACE_TEST_USER") or "apitest"
+    password = os.environ.get("PACE_TEST_PASS") or "apitest12345"
+    try:
+        status, me = get("/api/auth/me")
+        if status == 200:
+            return me.get("user")
+    except Exception:
+        pass
+    for path in ("/api/auth/login", "/api/auth/register"):
+        try:
+            payload = {"username": user, "password": password, "remember": True}
+            status, body = post(path, payload)
+            if status == 200 and body.get("user"):
+                return body["user"]
+        except urllib.error.HTTPError:
+            continue
+    return None
 
 
 def status_of(path):
@@ -76,6 +107,24 @@ def main() -> int:
         print(f"无法连接: {exc}")
         return 2
     check("health", status == 200 and health.get("ok"), f"{health.get('activities')} 活动 {ms:.0f}ms")
+
+    # 账号：未登录要挡住；然后登录（没有就注册）
+    try:
+        code = status_of("/api/activities")
+    except Exception:
+        code = 0
+    check("未登录访问接口被挡住", code in (401, 200),
+          f"{code}（200 = 该实例用了 --no-auth）")
+    user = login_for_tests()
+    check("测试账号能登录", bool(user), (user or {}).get("username", "登录失败"))
+    if user:
+        status, me, _ = get("/api/auth/me")
+        check("me 返回当前账号", status == 200 and me.get("user", {}).get("id") == user.get("id"))
+        try:
+            status, _, _ = get("/api/auth/users")
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+        check("成员列表只对站长开放", status in (200, 403), str(status))
 
     status, meta, ms = get("/api/meta")
     check("meta", status == 200 and "settings" in meta)
@@ -156,7 +205,7 @@ def main() -> int:
               str(wps[1]) if wps else "empty")
         check("爬升能存下来", abs(float(one.get("climb_m") or 0) - 45.5) < 0.01,
               str(one.get("climb_m")))
-        req = urllib.request.Request(f"{BASE}/api/routebooks/{rid}/gpx")
+        req = urllib.request.Request(f"{BASE}/api/routebooks/{rid}/gpx", headers=dict(AUTH))
         with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=20) as resp:
             gpx = resp.read().decode("utf-8")
         check("GPX 带途经点航点", gpx.count("<wpt ") == 2, str(gpx.count("<wpt ")))
@@ -212,7 +261,7 @@ def main() -> int:
     # 静态资源
     for path, kind in (("/", "text/html"), ("/css/app.css", "text/css"),
                        ("/js/app.js", "javascript"), ("/favicon.svg", "svg")):
-        req = urllib.request.Request(BASE + path)
+        req = urllib.request.Request(BASE + path, headers=dict(AUTH))
         with urllib.request.urlopen(req, timeout=15) as resp:
             check(f"static {path}", resp.status == 200 and kind in resp.headers.get("Content-Type", ""),
                   resp.headers.get("Content-Type", ""))

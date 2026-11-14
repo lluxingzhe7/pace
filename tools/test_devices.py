@@ -211,7 +211,7 @@ def test_api():
     db = os.path.join(TMP, "api.db")
     store = open_store(db)
     store.close()
-    httpd, app = build_server(db, os.path.join(ROOT, "web"), 0)
+    httpd, app = build_server(db, os.path.join(ROOT, "web"), 0, auth_required=False)
     port = httpd.server_address[1]
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{port}"

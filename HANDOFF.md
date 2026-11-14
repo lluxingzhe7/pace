@@ -1374,4 +1374,54 @@ W1 节奏骑 21.5 km + 百公里长距离 40.5 km；W13 减量周 60 km（比峰
 - **发版自动化**：`.github/workflows/release.yml` —— 推 `v*` 标签后 GitHub Actions 自动建 Release 并挂 `pace-<tag>-src.zip`，不用再手动拖附件（v0.1 是手动建的）。
 - v0.1 Release 已发布：<https://github.com/lluxingzhe7/pace/releases/tag/v0.1>（附件 `pace-v0.1-src.zip`，SHA256 `d5560772…cea4`，105 个条目）。
 
+---
+
+## 三十七、账号体系（2026-11-14 下午）
+
+给朋友用需要「注册登录 + 数据隔离」，这一版做了（满血版）。
+
+### 架构：一人一个库
+
+- 账号库单独放 `data/auth.db`（users / sessions / login_fails / meta）。
+- 每个用户的数据在 `data/users/<id>/pace.db`，**物理隔离**，不是靠 SQL 里的 `WHERE user_id` 兜。
+  这样 10k 行后端里几百处 `app.store.xxx` 一行都不用改，也不会漏一个条件串号。
+- `App` 用线程本地保存「当前请求的用户」，`store / importer / sync / settings() / cache` 都跟着它走。
+- 首次注册时 `App.migrate_legacy()` 把旧的 `data/pace.db`（+wal/shm）搬进这个账号，
+  实测 6 条活动、3 条路书全部带过来。
+
+### 安全
+
+- 口令 `scrypt`（N=2^14, r=8, p=1）+ 每用户随机盐，校验用 `hmac.compare_digest`。
+- 会话是服务端 session，库里只存 token 的 sha256；Cookie：`HttpOnly; SameSite=Lax`，
+  反代给 `X-Forwarded-Proto: https` 时自动加 `Secure`。
+- 登录失败双维度计数：单 IP 15 分钟 5 次、单用户名 20 次即 429。
+- 改密码会吊销该用户全部会话；站长不能被直接删（要先删其他成员）。
+- `/api/health` 匿名可用（启动探针），但**不带活动数**；其余 `/api/*` 一律 401。
+
+### 接口
+
+`/api/auth/status | register | login | logout | me | password | delete | users | registration`
+
+### 前端
+
+`web/js/auth.js`：未登录时整屏门禁（登录/注册/首次建站），`body.auth-locked` 隐藏主界面；
+登录后顶栏出现用户名按钮，可改密码 / 退出。任何接口 401 会触发 `pace:unauth` 重新走门禁。
+
+### 测试
+
+新增 `tools/test_auth.py` **53 项**：口令哈希/强度、注册规则、会话（含「库里不存明文 token」）、
+限流、以及起真实服务验证「匿名 401 / 注册迁移 / A 看不到 B / 越权 404 / 站长权限 / 删号清库」。
+`check_api.py` 43 → **47 项**（登录、me、成员列表、未登录拦截）。
+全量 **705 项全绿**（14 个套件）。
+
+浏览器实测（无头 Edge，登录页 + 登录后）：`.ui/400-login.png`、`.ui/401-logged-in.png`，
+控制台零报错，登录后侧栏显示「6 条活动 · v1.1.0」。
+
+### 已知缺口（还没做）
+
+- 忘记密码（没有邮件通道，只能站长手动改库 / 后续加重置码）
+- 注册需要邀请码（目前只有「站长开关注册」）
+- 登录页没有「记住用户名」
+
+
 

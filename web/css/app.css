@@ -1393,5 +1393,31 @@ body.rb-locked { overflow: hidden; }
 }
 .rb-climb-tr { cursor: pointer; }
 .rb-climb-tr:hover td { background: var(--bg-elev-2); }
+
+/* ── 登录门禁 ───────────────────────────────────────────── */
+.auth-gate {
+  position: fixed; inset: 0; z-index: 1000; overflow: auto;
+  display: grid; place-items: center; padding: 24px;
+  background: radial-gradient(1200px 600px at 50% -10%, var(--bg-elev-2), var(--bg));
+}
+.auth-gate[hidden] { display: none; }
+.auth-panel { width: min(420px, 100%); display: flex; flex-direction: column; gap: 16px; }
+.auth-brand { display: flex; align-items: center; gap: 10px; justify-content: center; }
+.auth-brand .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; }
+.auth-card { padding: 22px; }
+.auth-title { font-size: 18px; margin-bottom: 6px; }
+.auth-sub { margin-bottom: 14px; line-height: 1.7; }
+.auth-field { display: block; font-size: 12px; color: var(--text-3); margin-bottom: 10px; }
+.auth-field .control { width: 100%; margin-top: 5px; }
+.auth-check { display: flex; align-items: center; gap: 6px; font-size: 12px;
+  color: var(--text-3); margin: 2px 0 14px; }
+.auth-error { color: var(--warn); font-size: 12.5px; margin-bottom: 10px; }
+.auth-alt { margin-top: 14px; text-align: center; }
+.auth-foot { text-align: center; }
+.auth-chip { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.linklike { background: none; border: 0; padding: 0; color: var(--accent-2);
+  cursor: pointer; font: inherit; }
+body.auth-locked #app { display: none; }
+body.auth-locked { overflow: hidden; }
 .rb-climb-filter { margin: 0 16px 12px; flex-wrap: wrap; max-width: calc(100% - 32px); }
 .rb-climb-filter button { font-variant-numeric: tabular-nums; }

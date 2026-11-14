@@ -216,7 +216,7 @@ def test_store_and_api() -> None:
 
     # 启动真实服务验证 HTTP
     from pace.server import build_server
-    httpd, app = build_server(db, os.path.join(ROOT, "web"), 0)
+    httpd, app = build_server(db, os.path.join(ROOT, "web"), 0, auth_required=False)
     port = httpd.server_address[1]
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()

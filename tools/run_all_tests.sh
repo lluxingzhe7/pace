@@ -33,6 +33,7 @@ run devices         "$PY" tools/test_devices.py
 run strava_api      "$PY" tools/test_strava_api.py
 run routebook       "$PY" tools/test_routebook.py
 run llm             "$PY" tools/test_llm.py
+run auth            "$PY" tools/test_auth.py
 run ble_ui          "$NODE" tools/test_ble_ui.js
 run routing         "$NODE" tools/test_routing_js.js
 run check_api       "$PY" tools/check_api.py "$URL"

@@ -34,6 +34,9 @@
       try { payload = await resp.json(); } catch (e) { payload = null; }
     }
     if (!resp.ok) {
+      if (resp.status === 401 && path.indexOf('/api/auth/') !== 0) {
+        window.dispatchEvent(new CustomEvent('pace:unauth'));
+      }
       const msg = (payload && (payload.error || payload.message)) || `请求失败 (${resp.status})`;
       const error = new Error(msg);
       error.status = resp.status;
@@ -48,6 +51,14 @@
 
   const api = {
     health: () => request('/api/health', { timeout: 8000 }),
+    // 账号
+    authStatus: () => request('/api/auth/status'),
+    login: (body) => request('/api/auth/login', { method: 'POST', body }),
+    register: (body) => request('/api/auth/register', { method: 'POST', body }),
+    logout: () => request('/api/auth/logout', { method: 'POST' }),
+    me: () => request('/api/auth/me'),
+    changePassword: (body) => request('/api/auth/password', { method: 'POST', body }),
+    authUsers: () => request('/api/auth/users'),
     meta: () => request('/api/meta'),
     dashboard: (params) => request('/api/dashboard' + qs(withTz(params))),
     activities: (params) => request('/api/activities' + qs(params)),

@@ -9,6 +9,7 @@ import argparse
 import json
 import mimetypes
 import os
+import shutil
 import socket
 import sys
 import threading
@@ -19,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import analysis, analytics, geo, parsers, routebook
+from .auth import AuthError, AuthStore
 from .coach import evaluate as coach_evaluate
 from .coach import plan as coach_plan
 from .devices import SyncEngine
@@ -27,7 +29,8 @@ from .parsers import ParseError, sport_family, sport_label
 from .store import Store, open_store
 from .summary_build import build_from_summary
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
+SESSION_COOKIE = "pace_session"
 MAX_UPLOAD_BYTES = 512 * 1024 * 1024  # 512 MB
 
 
@@ -38,25 +41,121 @@ class ApiError(Exception):
         self.message = message
 
 
-class App:
-    """应用上下文：数据库、设置、统计缓存、导入器、设备同步。"""
+class UserContext:
+    """一个用户的运行时对象：独立数据库 + 导入器 + 同步引擎。"""
 
-    def __init__(self, db_path: str, web_dir: str):
+    def __init__(self, app: "App", user_id: int, db_path: str):
+        self.user_id = user_id
         self.db_path = db_path
-        self.web_dir = web_dir
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
         self.store = open_store(db_path)
-        self.lock = threading.Lock()
-        self._cache: dict[str, tuple[float, dict]] = {}
-        self.importer = Importer(self.store, self.analysis_options)
+
+        def _options() -> dict:
+            settings = self.store.get_settings()
+            return {"max": settings.get("hr_max", 190), "rest": settings.get("hr_rest", 55),
+                    "threshold": settings.get("hr_threshold", 168)}
+
+        self.importer = Importer(self.store, _options)
         state_path = os.path.join(os.path.dirname(os.path.abspath(db_path)), "sync-state.json")
         self.sync = SyncEngine(self.store, state_path, self.importer.import_file)
+
+    def close(self) -> None:
+        try:
+            self.store.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+class App:
+    """应用上下文：账号库 + 每个用户一套运行时。
+
+    `store` / `importer` / `sync` / `settings()` 都跟着**当前请求的用户**走：
+    handler 在处理请求前调用 `set_user()`，用户 id 存在线程本地，
+    这样底下几百处 `app.store.xxx` 一行都不用改，也不会串号。
+    """
+
+    def __init__(self, db_path: str, web_dir: str, *, auth_required: bool = True):
+        self.db_path = os.path.abspath(db_path)
+        self.web_dir = web_dir
+        self.auth_required = auth_required
+        self.data_dir = os.path.dirname(self.db_path)
+        self.users_dir = os.path.join(self.data_dir, "users")
+        os.makedirs(self.data_dir, exist_ok=True)
+        self.lock = threading.Lock()
+        self._cache: dict[str, tuple[float, dict]] = {}
+        self._contexts: dict[int, UserContext] = {}
+        self._ctx_lock = threading.RLock()
+        self._local = threading.local()
+        self.auth = AuthStore(os.path.join(self.data_dir, "auth.db")) if auth_required else None
+        if not auth_required:
+            self._local.uid = 0
         self._auto_stop = threading.Event()
         self._auto_thread: threading.Thread | None = None
+
+    # --------------------------------------------------- 用户上下文
+
+    def set_user(self, user_id: int) -> None:
+        self._local.uid = int(user_id)
+
+    @property
+    def user_id(self) -> int:
+        return int(getattr(self._local, "uid", 0))
+
+    def user_db_path(self, user_id: int) -> str:
+        if not self.auth_required or user_id == 0:
+            return self.db_path
+        return os.path.join(self.users_dir, str(user_id), "pace.db")
+
+    def context(self, user_id: int | None = None) -> UserContext:
+        uid = self.user_id if user_id is None else int(user_id)
+        if self.auth_required and uid <= 0:
+            raise RuntimeError("未登录：没有可用的用户上下文")
+        with self._ctx_lock:
+            ctx = self._contexts.get(uid)
+            if ctx is None:
+                ctx = UserContext(self, uid, self.user_db_path(uid))
+                self._contexts[uid] = ctx
+            return ctx
+
+    def close_user(self, user_id: int) -> None:
+        with self._ctx_lock:
+            ctx = self._contexts.pop(int(user_id), None)
+        if ctx:
+            ctx.close()
+
+    @property
+    def store(self) -> Store:
+        return self.context().store
+
+    @property
+    def importer(self) -> Importer:
+        return self.context().importer
+
+    @property
+    def sync(self) -> SyncEngine:
+        return self.context().sync
+
+    def migrate_legacy(self, user_id: int) -> bool:
+        """把单用户时期的 data/pace.db 搬进第一个注册的账号。"""
+        if not self.auth_required:
+            return False
+        target = self.user_db_path(user_id)
+        if os.path.exists(target) or not os.path.exists(self.db_path):
+            return False
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        for suffix in ("-wal", "-shm"):
+            sidecar = self.db_path + suffix
+            if os.path.exists(sidecar):
+                try:
+                    os.replace(sidecar, target + suffix)
+                except OSError:
+                    os.remove(sidecar)
+        os.replace(self.db_path, target)
+        return True
 
     # ------------------------------------------------------------ 自动同步
 
     def start_auto_sync(self) -> None:
-        """后台线程：按 auto_sync_seconds 设置周期性扫描数据源。"""
         if self._auto_thread and self._auto_thread.is_alive():
             return
         self._auto_thread = threading.Thread(target=self._auto_loop, daemon=True,
@@ -66,17 +165,22 @@ class App:
     def _auto_loop(self) -> None:
         while not self._auto_stop.wait(20):
             try:
-                interval = int(self.settings().get("auto_sync_seconds") or 0)
-                if interval <= 0:
-                    continue
-                last = self.sync.state.data.get("last_sync") or 0
-                if time.time() - last < interval:
-                    continue
-                with self.lock:
-                    result = self.sync.sync(limit=20)
-                    if result["imported"]:
-                        self.invalidate()
-                        print(f"[自动同步] 导入 {result['imported']} 条活动")
+                with self._ctx_lock:
+                    uids = list(self._contexts.keys())
+                for uid in uids:
+                    self.set_user(uid)
+                    interval = int(self.settings().get("auto_sync_seconds") or 0)
+                    if interval <= 0:
+                        continue
+                    sync = self.sync
+                    last = sync.state.data.get("last_sync") or 0
+                    if time.time() - last < interval:
+                        continue
+                    with self.lock:
+                        result = sync.sync(limit=20)
+                        if result["imported"]:
+                            self.invalidate()
+                            print(f"[自动同步] 用户 {uid} 导入 {result['imported']} 条活动")
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
 
@@ -85,6 +189,7 @@ class App:
 
     def settings(self) -> dict:
         return self.store.get_settings()
+
     def analysis_options(self) -> dict:
         s = self.settings()
         return {"max": s.get("hr_max", 190), "rest": s.get("hr_rest", 55),
@@ -92,15 +197,18 @@ class App:
 
     def cached(self, key: str, ttl: float, builder):
         now = time.time()
-        hit = self._cache.get(key)
+        cache_key = f"{self.user_id}:{key}"
+        hit = self._cache.get(cache_key)
         if hit and now - hit[0] < ttl:
             return hit[1]
         value = builder()
-        self._cache[key] = (now, value)
+        self._cache[cache_key] = (now, value)
         return value
 
     def invalidate(self) -> None:
-        self._cache.clear()
+        prefix = f"{self.user_id}:"
+        for key in [k for k in self._cache if k.startswith(prefix)]:
+            self._cache.pop(key, None)
 
 
 def json_default(obj):
@@ -198,6 +306,8 @@ def make_handler(app: App):
                         self._handle_api(method, path, query)
                 else:
                     self._serve_static(path)
+            except AuthError as exc:
+                self.send_error_json(exc.message, exc.status)
             except ApiError as exc:
                 self.send_error_json(exc.message, exc.status)
             except BrokenPipeError:
@@ -206,17 +316,159 @@ def make_handler(app: App):
                 traceback.print_exc()
                 self.send_error_json(f"服务器内部错误: {exc}", 500)
 
+        # -------------------------------------------------- 账号
+
+        def _auth_token(self) -> str:
+            raw = self.headers.get("Cookie") or ""
+            for part in raw.split(";"):
+                name, _, value = part.strip().partition("=")
+                if name == SESSION_COOKIE:
+                    return value
+            return ""
+
+        def _session_cookie(self, token: str, expires: float) -> str:
+            ttl = max(0, int(expires - time.time()))
+            secure = "; Secure" if (self.headers.get("X-Forwarded-Proto") or "").lower() == "https" else ""
+            return (f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; "
+                    f"Max-Age={ttl}{secure}")
+
+        def _clear_cookie(self) -> str:
+            return f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+
+        def _handle_auth(self, method: str, path: str, q: dict):
+            auth = app.auth
+            if auth is None:
+                raise ApiError("这个实例没有开启账号系统", 404)
+            ip = self.client_address[0]
+
+            if path == "/api/auth/status":
+                user = auth.session_user(self._auth_token())
+                if user:
+                    app.set_user(user["id"])
+                count = auth.count_users()
+                return self.send_json({
+                    "needs_setup": count == 0,
+                    "registration_open": auth.registration_open(),
+                    "users_count": count,
+                    "user": user,
+                    "legacy_pending": count == 0 and os.path.exists(app.db_path),
+                })
+
+            if path == "/api/auth/register":
+                if method != "POST":
+                    raise ApiError("需要 POST", 405)
+                body = self.read_json()
+                user = auth.register(body.get("username") or "", body.get("password") or "",
+                                     body.get("email") or "")
+                migrated = app.migrate_legacy(user["id"]) if user["role"] == "owner" else False
+                token, expires = auth.create_session(user["id"], remember=True,
+                                                     ua=self.headers.get("User-Agent", ""), ip=ip)
+                app.set_user(user["id"])
+                return self.send_json({"user": user, "expires_at": expires, "migrated": migrated},
+                                      extra_headers={"Set-Cookie": self._session_cookie(token, expires)})
+
+            if path == "/api/auth/login":
+                if method != "POST":
+                    raise ApiError("需要 POST", 405)
+                body = self.read_json()
+                user = auth.authenticate(body.get("username") or "", body.get("password") or "", ip=ip)
+                token, expires = auth.create_session(user["id"], remember=bool(body.get("remember")),
+                                                     ua=self.headers.get("User-Agent", ""), ip=ip)
+                app.set_user(user["id"])
+                return self.send_json({"user": user, "expires_at": expires},
+                                      extra_headers={"Set-Cookie": self._session_cookie(token, expires)})
+
+            if path == "/api/auth/logout":
+                if method != "POST":
+                    raise ApiError("需要 POST", 405)
+                auth.revoke(self._auth_token())
+                return self.send_json({"ok": True},
+                                      extra_headers={"Set-Cookie": self._clear_cookie()})
+
+            if path == "/api/auth/me":
+                user = auth.session_user(self._auth_token())
+                if not user:
+                    raise ApiError("未登录", 401)
+                app.set_user(user["id"])
+                return self.send_json({"user": user, "registration_open": auth.registration_open()})
+
+            if path == "/api/auth/password":
+                if method != "POST":
+                    raise ApiError("需要 POST", 405)
+                user = auth.session_user(self._auth_token())
+                if not user:
+                    raise ApiError("未登录", 401)
+                body = self.read_json()
+                auth.change_password(user["id"], body.get("old_password") or "",
+                                     body.get("new_password") or "")
+                token, expires = auth.create_session(user["id"], remember=True,
+                                                     ua=self.headers.get("User-Agent", ""), ip=ip)
+                return self.send_json({"ok": True},
+                                      extra_headers={"Set-Cookie": self._session_cookie(token, expires)})
+
+            if path == "/api/auth/delete":
+                if method != "POST":
+                    raise ApiError("需要 POST", 405)
+                user = auth.session_user(self._auth_token())
+                if not user:
+                    raise ApiError("未登录", 401)
+                body = self.read_json()
+                if not body.get("password"):
+                    raise ApiError("请输入密码确认删除", 400)
+                auth.authenticate(user["username"], body.get("password"), ip=ip)
+                auth.delete_user(user["id"])
+                app.close_user(user["id"])
+                shutil.rmtree(os.path.join(app.users_dir, str(user["id"])), ignore_errors=True)
+                return self.send_json({"ok": True},
+                                      extra_headers={"Set-Cookie": self._clear_cookie()})
+
+            if path == "/api/auth/users":
+                user = auth.session_user(self._auth_token())
+                if not user:
+                    raise ApiError("未登录", 401)
+                if user["role"] != "owner":
+                    raise ApiError("只有站长能看成员列表", 403)
+                return self.send_json({"users": auth.list_users(),
+                                       "registration_open": auth.registration_open()})
+
+            if path == "/api/auth/registration":
+                if method != "POST":
+                    raise ApiError("需要 POST", 405)
+                user = auth.session_user(self._auth_token())
+                if not user or user["role"] != "owner":
+                    raise ApiError("只有站长能改注册开关", 403)
+                body = self.read_json()
+                auth.set_registration_open(bool(body.get("open")))
+                return self.send_json({"registration_open": auth.registration_open()})
+
+            raise ApiError("未知接口 " + path, 404)
+
         # -------------------------------------------------- API
 
         def _handle_api(self, method: str, path: str, q: dict):
-            store = app.store
-
             if path == "/api/health":
-                return self.send_json({
-                    "ok": True, "version": APP_VERSION,
-                    "activities": store.count(),
-                    "time": time.time(),
-                })
+                # 启动探针要能匿名访问（run.py 靠它等服务器起来）；
+                # 活动数只在已登录（或关掉账号系统）时返回，避免匿名泄露数据量
+                payload = {"ok": True, "version": APP_VERSION, "time": time.time()}
+                if app.auth_required:
+                    user = app.auth.session_user(self._auth_token())
+                    if user:
+                        app.set_user(user["id"])
+                        payload["activities"] = app.store.count()
+                else:
+                    payload["activities"] = app.store.count()
+                return self.send_json(payload)
+
+            if path.startswith("/api/auth/"):
+                return self._handle_auth(method, path, q)
+
+            if app.auth_required:
+                user = app.auth.session_user(self._auth_token())
+                if not user:
+                    raise ApiError("未登录", 401)
+                app.set_user(user["id"])
+
+            store = app.store
 
             if path == "/api/meta":
                 return self.send_json({
@@ -1236,8 +1488,9 @@ class QuietServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def build_server(db_path: str, web_dir: str, port: int = 0) -> tuple[ThreadingHTTPServer, App]:
-    app = App(db_path, web_dir)
+def build_server(db_path: str, web_dir: str, port: int = 0, *,
+                 auth_required: bool = True) -> tuple[ThreadingHTTPServer, App]:
+    app = App(db_path, web_dir, auth_required=auth_required)
     handler = make_handler(app)
     httpd = QuietServer(("127.0.0.1", port), handler)
     httpd.daemon_threads = True
@@ -1251,15 +1504,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", default=os.path.join(root, "data", "pace.db"))
     parser.add_argument("--web", default=os.path.join(root, "web"))
     parser.add_argument("--open", action="store_true", help="启动后打开浏览器")
+    parser.add_argument("--no-auth", action="store_true",
+                        help="关闭账号系统（只给自己本机用，等同于旧版行为）")
     args = parser.parse_args(argv)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.db)), exist_ok=True)
     port = find_free_port(args.port)
-    httpd, app = build_server(args.db, args.web, port)
+    httpd, app = build_server(args.db, args.web, port, auth_required=not args.no_auth)
     url = f"http://127.0.0.1:{httpd.server_address[1]}/"
     print(f"PACE 已启动: {url}")
-    print(f"数据库: {args.db}")
-    print(f"已有活动: {app.store.count()} 条")
+    if app.auth_required:
+        print(f"账号库: {os.path.join(app.data_dir, 'auth.db')}")
+        ready = app.auth.count_users()
+        if not ready:
+            print("还没有账号：首次打开页面先创建站长账号（现有数据会迁入这个账号）")
+        else:
+            print(f"成员: {ready} 人")
+    else:
+        print(f"数据库: {args.db}")
+        print(f"已有活动: {app.store.count()} 条")
     if args.open:
         import webbrowser
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
@@ -1269,7 +1532,12 @@ def main(argv: list[str] | None = None) -> int:
         print("\n正在关闭…")
     finally:
         httpd.shutdown()
-        app.store.close()
+        with app._ctx_lock:
+            contexts = list(app._contexts.values())
+        for ctx in contexts:
+            ctx.close()
+        if app.auth is not None:
+            app.auth.close()
     return 0
 
 

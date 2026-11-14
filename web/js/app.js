@@ -186,11 +186,12 @@
 
   async function refreshSidebar() {
     try {
-      const h = await api.health();
+      const list = await api.activities({ limit: 1 });
+      const count = Number(list.total || 0);
       const el = document.getElementById('sidebarStats');
-      if (el) el.textContent = `${h.activities} 条活动 · v${h.version}`;
+      if (el) el.textContent = `${count} 条活动 · v${App.version || ''}`;
       const nav = document.getElementById('navActivityCount');
-      if (nav && !nav.textContent) nav.textContent = h.activities;
+      if (nav) nav.textContent = count;
     } catch (err) {
       const el = document.getElementById('sidebarStats');
       if (el) el.textContent = '无法连接服务';
@@ -202,6 +203,13 @@
     UI.Importer.init();
     Icon.hydrate(document);
     syncSportSwitch();
+
+    // 没登录就只显示门禁，别初始化任何页面
+    if (window.Auth) {
+      const ready = await Auth.boot();
+      if (!ready) return;
+      Auth.mountChip();
+    }
 
     // 读取设置（主题、瓦片）
     try {

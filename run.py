@@ -70,6 +70,7 @@ def main() -> int:
     parser.add_argument("--db", default=DATABASE)
     parser.add_argument("--no-open", action="store_true")
     parser.add_argument("--seed-demo", action="store_true", help="导入 sample-data 示例数据")
+    parser.add_argument("--no-auth", action="store_true", help="关闭账号系统（只给自己本机用）")
     args = parser.parse_args()
 
     os.makedirs(os.path.dirname(os.path.abspath(args.db)), exist_ok=True)
@@ -78,14 +79,19 @@ def main() -> int:
     from pace import server
 
     port = server.find_free_port(args.port)
-    httpd, app = server.build_server(args.db, os.path.join(ROOT, "web"), port)
+    httpd, app = server.build_server(args.db, os.path.join(ROOT, "web"), port,
+                                     auth_required=not args.no_auth)
     url = f"http://127.0.0.1:{port}/"
     print("=" * 52)
     print("  PACE · 运动数据分析")
     print("=" * 52)
     print(f"  地址   {url}")
-    print(f"  数据库 {args.db}")
-    print(f"  活动数 {app.store.count()}")
+    if app.auth_required:
+        users = app.auth.count_users()
+        print("  账号   首次打开先创建站长账号" if not users else f"  成员   {users} 人")
+    else:
+        print(f"  数据库 {args.db}")
+        print(f"  活动数 {app.store.count()}")
     print("  按 Ctrl+C 停止")
     print("=" * 52)
 
@@ -129,7 +135,12 @@ def main() -> int:
         stop.set()
         app.stop_auto_sync()
         httpd.shutdown()
-        app.store.close()
+        with app._ctx_lock:
+            contexts = list(app._contexts.values())
+        for ctx in contexts:
+            ctx.close()
+        if app.auth is not None:
+            app.auth.close()
     return 0
 
 
