@@ -277,14 +277,14 @@
           <div class="onboard-actions">
             <button class="btn btn-primary" onclick="UI.Importer.open()">${Icon.get('upload')}导入活动</button>
             <button class="btn" id="btnDemo">先看示例数据</button>
-            <a class="btn btn-ghost" href="#/settings">导入数据包</a>
           </div>
           <ol class="onboard-steps">
             <li><b>1 · 导入</b>GPX / FIT / TCX / CSV</li>
             <li><b>2 · 分析</b>配速、心率区间、训练负荷</li>
             <li><b>3 · 教练</b>按目标生成训练计划</li>
           </ol>
-          <p class="onboard-foot">数据只存在这台设备的浏览器里 · 与电脑版不互通，可用「设置 → 导出 / 导入数据包」迁移</p>
+          <p class="onboard-foot">数据只存在这台设备的浏览器里 · 与电脑版不互通
+            <br>迁移用 <a href="#/settings">设置 → 导出 / 导入数据包</a></p>
         </div>`;
       const demoBtn = document.getElementById('btnDemo');
       if (demoBtn) demoBtn.addEventListener('click', startDemo);
