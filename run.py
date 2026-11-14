@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -88,6 +89,15 @@ def main() -> int:
     print("  PACE · 运动数据分析")
     print("=" * 52)
     print(f"  地址   {url}")
+    if args.host in ("0.0.0.0", "::"):
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            probe.connect(("8.8.8.8", 80))
+            lan = probe.getsockname()[0]
+            probe.close()
+            print(f"  手机   http://{lan}:{port}/   （同一 WiFi 下打开）")
+        except OSError:
+            pass
     if app.auth_required:
         users = app.auth.count_users()
         print("  账号   首次打开先创建站长账号" if not users else f"  成员   {users} 人")
