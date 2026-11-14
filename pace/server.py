@@ -139,6 +139,18 @@ class App:
     def sync(self) -> SyncEngine:
         return self.context().sync
 
+    def export_db_bytes(self) -> bytes:
+        """把当前用户的库合并 WAL 后整份导出（给「导出数据包」用）。"""
+        ctx = self.context()
+        con = ctx.store.conn
+        try:
+            con.commit()
+            con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:  # noqa: BLE001
+            pass
+        with open(ctx.db_path, "rb") as fh:
+            return fh.read()
+
     def migrate_legacy(self, user_id: int) -> bool:
         """把单用户时期的 data/pace.db 搬进第一个注册的账号。"""
         if not self.auth_required:
@@ -815,6 +827,14 @@ def make_handler(app: App):
                     app.invalidate()
                     return self.send_json({"ok": True})
                 raise ApiError("不支持的请求方法", 405)
+
+            if path == "/api/export/db":
+                if method != "GET":
+                    raise ApiError("需要 GET", 405)
+                payload = app.export_db_bytes()
+                return self._send(200, payload, "application/x-sqlite3", {
+                    "Content-Disposition": 'attachment; filename="pace.db"',
+                })
 
             if path == "/api/settings":
                 if method == "GET":

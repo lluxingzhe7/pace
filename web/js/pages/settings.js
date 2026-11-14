@@ -224,8 +224,10 @@
                 : `<a class="btn" href="/api/activities?limit=500" download="pace-activities.json">${Icon.get('download')}导出活动 JSON</a>`}
               <button class="btn" id="btnRecompute">${Icon.get('spark')}重算全部指标</button>
               <button class="btn" onclick="UI.Importer.open()">${Icon.get('upload')}导入更多</button>
-              ${isStatic ? `<button class="btn" id="btnExportDb">导出数据包</button>
-              <label class="btn" style="margin:0">导入数据包<input id="fileImportDb" type="file" accept=".db" hidden></label>` : ''}
+              ${isStatic
+                ? `<button class="btn" id="btnExportDb">导出数据包</button>
+              <label class="btn" style="margin:0">导入数据包<input id="fileImportDb" type="file" accept=".db" hidden></label>`
+                : `<a class="btn" href="/api/export/db" download="pace.db">导出数据包（SQLite）</a>`}
             </div>
             <p class="tiny dim" style="margin-top:12px;line-height:1.7">
               ${isStatic
