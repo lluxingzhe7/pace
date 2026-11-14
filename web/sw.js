@@ -11,6 +11,8 @@ const ASSETS = [
   './js/pages/segment_detail.js', './js/pages/compare.js', './js/pages/coach.js',
   './js/pages/devices.js', './js/pages/ble.js', './js/pages/settings.js',
   './py/pace.zip',
+  './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png',
+  './icons/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (event) => {
