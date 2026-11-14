@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PACE · 运动数据分析</title>
+<meta name="description" content="本地优先的运动数据仪表盘：导入 GPX / FIT / TCX / CSV，分析配速、心率、爬升、训练负荷与分段成绩。">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="#/" aria-label="PACE 首页">
+      <span class="brand-mark">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 22 L11 11 L17 18 L23 8 L28 15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="23" cy="8" r="2.6" fill="currentColor"/></svg>
+      </span>
+      <span class="brand-text"><b>PACE</b><small>运动数据分析</small></span>
+    </a>
+
+    <nav class="nav" aria-label="主导航">
+      <a href="#/" data-nav="dashboard"><span class="nav-ico" data-icon="grid"></span>仪表盘</a>
+      <a href="#/coach" data-nav="coach"><span class="nav-ico" data-icon="spark"></span>教练</a>
+      <a href="#/activities" data-nav="activities"><span class="nav-ico" data-icon="list"></span>运动数据<span class="nav-count" id="navActivityCount"></span></a>
+      <div class="nav-sub" id="navSports">
+        <a href="#/activities?sport=ride" data-sport-nav="ride"><span class="nav-ico" data-icon="ride"></span>骑行</a>
+        <a href="#/activities?sport=run" data-sport-nav="run"><span class="nav-ico" data-icon="run"></span>跑步</a>
+        <a href="#/activities?sport=swim" data-sport-nav="swim"><span class="nav-ico" data-icon="swim"></span>游泳</a>
+      </div>
+      <a href="#/routebook" data-nav="routebook"><span class="nav-ico" data-icon="route"></span>路书</a>
+      <a href="#/compare" data-nav="compare"><span class="nav-ico" data-icon="compare"></span>对比</a>
+      <a href="#/devices" data-nav="devices"><span class="nav-ico" data-icon="link"></span>数据源</a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button class="btn btn-primary btn-block" id="btnImportSide">
+        <span data-icon="upload"></span>导入活动
+      </button>
+      <a class="nav subtle" href="#/settings" data-nav="settings">
+        <span class="nav-ico" data-icon="sliders"></span>设置
+      </a>
+      <p class="tiny muted" id="sidebarStats">正在载入…</p>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="btnMenu" aria-label="打开菜单"><span data-icon="menu"></span></button>
+      <div class="topbar-title" id="pageTitle">仪表盘</div>
+      <div class="topbar-right">
+        <div class="seg" id="sportSwitch" role="group" aria-label="运动类型">
+          <button data-sport="all" class="active">全部</button>
+          <button data-sport="run">跑步</button>
+          <button data-sport="ride">骑行</button>
+          <button data-sport="swim">游泳</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="view" tabindex="-1"></main>
+  </div>
+</div>
+
+<!-- 导入对话框 -->
+<dialog class="dialog" id="importDialog">
+  <form method="dialog" class="dialog-head">
+    <h2>导入活动</h2>
+    <button class="icon-btn" value="cancel" aria-label="关闭"><span data-icon="x"></span></button>
+  </form>
+  <div class="dialog-body">
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="选择或拖入文件">
+      <span class="drop-ico" data-icon="cloud"></span>
+      <p><b>拖入文件</b>，或点击选择</p>
+      <p class="tiny muted">支持 GPX、TCX、FIT、CSV（Strava 导出）· 可多选</p>
+      <input type="file" id="fileInput" multiple accept=".gpx,.tcx,.fit,.csv,.json,.txt" hidden>
+    </div>
+    <div class="import-progress" id="importProgress" hidden>
+      <div class="bar"><i id="importBar"></i></div>
+      <p class="tiny muted" id="importStatus"></p>
+    </div>
+    <div class="import-results" id="importResults"></div>
+    <details class="advanced">
+      <summary>从 Strava 批量导出里导入</summary>
+      <p class="tiny muted">
+        Strava 网页版 → 设置 → 我的账户 → 开始归档导出。下载后解压，
+        把 <code>activities.csv</code> 和 <code>activities/</code> 里的文件一起拖进来即可。
+        我会自动去重、并按 <code>Activity ID</code> 关联。
+      </p>
+    </details>
+  </div>
+</dialog>
+
+<!-- 通用提示 -->
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<!-- 全局悬浮提示 -->
+<div class="chart-tip" id="chartTip" hidden></div>
+
+<script src="js/icons.js"></script>
+<script src="js/util.js"></script>
+<script src="js/api.js"></script>
+<script src="js/chart.js"></script>
+<script src="js/map.js"></script>
+<script src="js/routing.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/pages/dashboard.js"></script>
+<script src="js/pages/activities.js"></script>
+<script src="js/pages/detail.js"></script>
+<script src="js/pages/routebook.js"></script>
+<script src="js/pages/segments.js"></script>
+<script src="js/pages/segment_detail.js"></script>
+<script src="js/pages/compare.js"></script>
+<script src="js/pages/coach.js"></script>
+<script src="js/pages/devices.js"></script>
+<script src="js/pages/ble.js"></script>
+<script src="js/pages/settings.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
