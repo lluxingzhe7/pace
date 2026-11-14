@@ -16,7 +16,7 @@
 <meta name="apple-mobile-web-app-title" content="PACE">
 <script>
   // 纯前端模式：GitHub Pages（或本地 ?static=1）时用 Pyodide 在浏览器里跑引擎
-  window.PACE_STATIC = /(^|\.)github\.io$/.test(location.hostname)
+  window.PACE_STATIC = /(^|\.)(github\.io|pages\.dev|netlify\.app|vercel\.app)$/.test(location.hostname)
     || /(?:^|[?&])static=1/.test(location.search);
 </script>
 <link rel="stylesheet" href="css/app.css">
