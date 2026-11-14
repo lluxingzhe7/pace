@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import mimetypes
 import os
@@ -31,6 +32,9 @@ from .store import Store, open_store
 from .summary_build import build_from_summary
 
 APP_VERSION = "1.1.0"
+# 这些类型才值得压缩（图片/字体本身已压缩）
+COMPRESSIBLE = {"text/html", "text/css", "text/plain", "application/javascript",
+                "application/json", "image/svg+xml"}
 SESSION_COOKIE = "pace_session"
 MAX_UPLOAD_BYTES = 512 * 1024 * 1024  # 512 MB
 
@@ -238,13 +242,22 @@ def make_handler(app: App):
 
         def _send(self, status: int, body: bytes, content_type: str,
                   extra_headers: dict | None = None):
+            headers = dict(extra_headers or {})
+            ctype = content_type.split(";")[0].strip().lower()
+            # 3M 带宽的机器上，gzip 能把前端从 450 KB 压到 ~120 KB
+            if (len(body) >= 1024 and ctype in COMPRESSIBLE
+                    and "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+                    and "Content-Encoding" not in headers):
+                body = gzip.compress(body, 6)
+                headers["Content-Encoding"] = "gzip"
+                headers["Vary"] = "Accept-Encoding"
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store" if self.path.startswith("/api/")
                              else "no-cache")
             self.send_header("X-Content-Type-Options", "nosniff")
-            for key, value in (extra_headers or {}).items():
+            for key, value in headers.items():
                 self.send_header(key, value)
             self.end_headers()
             if self.command != "HEAD":
@@ -1225,9 +1238,17 @@ padding:9px 16px;border-radius:9px;font-size:13px;font-weight:600}}
                 ".woff2": "font/woff2",
                 ".map": "application/json",
             }.get(ext) or mimetypes.guess_type(target)[0] or "application/octet-stream"
+            info = os.stat(target)
+            etag = '"%x-%x"' % (int(info.st_mtime), info.st_size)
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                return
             with open(target, "rb") as fh:
                 body = fh.read()
-            self._send(200, body, mime)
+            self._send(200, body, mime, extra_headers={"ETag": etag})
 
     return Handler
 
