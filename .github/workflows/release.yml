@@ -26,5 +26,5 @@ jobs:
         with:
           files: pace-*-src.zip
           generate_release_notes: true
-          name: PACE ${GITHUB_REF_NAME}
+          name: PACE ${{ github.ref_name }}
           draft: false
