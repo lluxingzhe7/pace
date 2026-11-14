@@ -144,6 +144,13 @@
       const info = py.runPython(
         "import json\nfrom pace import webbridge\njson.dumps(webbridge.init('/data/pace.db'))");
       state.db = JSON.parse(info);
+      // 申请「持久存储」，降低浏览器在磁盘紧张时清掉数据的概率
+      try {
+        if (navigator.storage && navigator.storage.persist) {
+          const granted = await navigator.storage.persist();
+          state.persisted = !!granted;
+        }
+      } catch (err) { /* 不支持就算了 */ }
       state.ready = true;
       hideOverlay();
       console.log('[PACE] 引擎就绪，用时 ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒');
@@ -247,6 +254,14 @@
     ready: () => state.ready,
     get: idbGet,
     set: idbSet,
+    persisted: () => !!state.persisted,
+    async usage() {
+      if (!navigator.storage || !navigator.storage.estimate) return null;
+      try {
+        const est = await navigator.storage.estimate();
+        return { used: est.usage || 0, quota: est.quota || 0, persisted: !!state.persisted };
+      } catch (err) { return null; }
+    },
     reset: async () => {
       await idbSet(dbKey(), new ArrayBuffer(0));
       location.reload();

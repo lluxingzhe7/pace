@@ -254,10 +254,11 @@
             </div>
             <p class="tiny dim" style="margin-top:12px;line-height:1.7">
               ${isStatic
-                ? '数据存在这个浏览器里（IndexedDB）。换设备 / 清站点数据会丢，建议定期「导出数据包」。'
+                ? '数据存在这个浏览器里（IndexedDB），不经过 Cloudflare。换设备 / 清站点数据会丢，建议定期「导出数据包」。'
                 : '数据库位置：<code>data/pace.db</code>（SQLite）。直接备份这个文件即可。'}
               所有分析都在本机完成，不会上传任何数据。
             </p>
+            ${isStatic ? '<p class="tiny dim" id="storeUsage" style="margin-top:6px"></p>' : ''}
           </div>
         </div>
 
@@ -585,6 +586,16 @@
     }
   }
 
+  async function showStorage() {
+    const el = document.getElementById('storeUsage');
+    if (!el || !window.PaceWeb || !PaceWeb.usage) return;
+    const u = await PaceWeb.usage();
+    if (!u) { el.textContent = ''; return; }
+    const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
+    el.textContent = '浏览器已用 ' + mb(u.used) + ' / 可用约 ' + Math.round(u.quota / 1073741824)
+      + ' GB' + (u.persisted ? ' · 已申请持久存储（不会被自动清理）' : ' · 未获得持久存储（磁盘紧张时浏览器可能清理）');
+  }
+
   function wireRemote() {
     const btn = document.getElementById('btnRemote');
     const input = document.getElementById('setRemote');
@@ -614,7 +625,7 @@
       state.smtp = smtp || null;
       if (state.settings.theme) document.documentElement.dataset.theme = state.settings.theme;
       render();
-      if (window.PACE_STATIC) { wireStaticBackup(); wireRemote(); }
+      if (window.PACE_STATIC) { wireStaticBackup(); wireRemote(); showStorage(); }
     } catch (err) {
       root.innerHTML = `<div class="card">${UI.empty('info', '加载失败', U.esc(err.message))}</div>`;
     }
