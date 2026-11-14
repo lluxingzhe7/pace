@@ -66,6 +66,24 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 """
 
+SCHEMA_RESET = """
+CREATE TABLE IF NOT EXISTS password_resets (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    email       TEXT NOT NULL,
+    code_hash   TEXT NOT NULL,
+    salt        TEXT NOT NULL,
+    created_at  REAL NOT NULL,
+    expires_at  REAL NOT NULL,
+    tries       INTEGER NOT NULL DEFAULT 0,
+    used_at     REAL
+);
+CREATE INDEX IF NOT EXISTS idx_reset_email ON password_resets(email, created_at DESC);
+"""
+
+RESET_TTL = 10 * 60
+RESET_MAX_TRIES = 5
+
 
 class AuthError(Exception):
     """带 HTTP 状态码的业务错误，服务层直接转成 JSON。"""
@@ -138,6 +156,7 @@ class AuthStore:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.executescript(SCHEMA)
+        self.db.executescript(SCHEMA_RESET)
         self.db.commit()
 
     def close(self) -> None:
@@ -251,6 +270,9 @@ class AuthStore:
         with self.lock:
             row = self.db.execute("SELECT * FROM users WHERE username=? COLLATE NOCASE",
                                   (username,)).fetchone()
+            if not row and "@" in username:
+                row = self.db.execute("SELECT * FROM users WHERE lower(email)=?",
+                                      (username.lower(),)).fetchone()
         if not row or not _verify_password(password, row["password"]):
             self._record_fail(username, ip)
             raise AuthError("用户名或密码不对", 401)
@@ -328,6 +350,87 @@ class AuthStore:
             self.db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
             self.db.commit()
 
+    # ---------------------------------------------------------------- 找回密码
+
+    def user_by_email(self, email: str):
+        email = (email or "").strip().lower()
+        if not email:
+            return None
+        with self.lock:
+            row = self.db.execute("SELECT * FROM users WHERE lower(email)=? LIMIT 1",
+                                  (email,)).fetchone()
+            return _public_user(row) if row else None
+
+    def create_reset(self, user_id: int, email: str) -> str:
+        """生成 6 位重置码（只存加盐哈希），明文只交给发信方。"""
+        code = "%06d" % secrets.randbelow(1000000)
+        salt = secrets.token_hex(8)
+        now = time.time()
+        with self.lock:
+            self.db.execute(
+                "UPDATE password_resets SET used_at=? WHERE user_id=? AND used_at IS NULL",
+                (now, user_id))
+            self.db.execute(
+                "INSERT INTO password_resets(user_id, email, code_hash, salt, created_at, expires_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (user_id, (email or "").strip().lower(),
+                 hashlib.sha256((salt + code).encode()).hexdigest(), salt, now, now + RESET_TTL))
+            self.db.commit()
+        return code
+
+    def reset_fail_count(self, ip: str) -> int:
+        since = time.time() - FAIL_WINDOW
+        with self.lock:
+            return self._count_scope("forgot:" + (ip or "-"), since)
+
+    def record_reset_request(self, ip: str) -> None:
+        with self.lock:
+            self.db.execute("INSERT INTO login_fails(scope, happened) VALUES(?,?)",
+                            ("forgot:" + (ip or "-"), time.time()))
+            self.db.commit()
+
+    def consume_reset(self, email: str, code: str, new_password: str) -> dict:
+        """校验验证码并改密码；返回被重置的用户。"""
+        email = (email or "").strip().lower()
+        code = (code or "").strip()
+        if not email or not code:
+            raise AuthError("请填邮箱和验证码", 400)
+        check_password_strength(new_password)
+        with self.lock:
+            row = self.db.execute(
+                "SELECT * FROM password_resets WHERE email=? AND used_at IS NULL "
+                "ORDER BY created_at DESC LIMIT 1", (email,)).fetchone()
+            if not row:
+                raise AuthError("验证码不对或已过期，请重新获取", 400)
+            if row["expires_at"] < time.time():
+                raise AuthError("验证码已过期，请重新获取", 400)
+            if row["tries"] >= RESET_MAX_TRIES:
+                raise AuthError("尝试次数过多，请重新获取验证码", 429)
+            ok = hmac.compare_digest(
+                row["code_hash"], hashlib.sha256((row["salt"] + code).encode()).hexdigest())
+            if not ok:
+                self.db.execute("UPDATE password_resets SET tries=tries+1 WHERE id=?", (row["id"],))
+                self.db.commit()
+                raise AuthError("验证码不对或已过期，请重新获取", 400)
+            user_row = self.db.execute("SELECT * FROM users WHERE id=?",
+                                       (row["user_id"],)).fetchone()
+            if not user_row:
+                raise AuthError("账号已不存在", 404)
+            self.db.execute("UPDATE users SET password=? WHERE id=?",
+                            (_hash_password(new_password), row["user_id"]))
+            self.db.execute("UPDATE password_resets SET used_at=? WHERE id=?",
+                            (time.time(), row["id"]))
+            self.db.execute("DELETE FROM sessions WHERE user_id=?", (row["user_id"],))
+            self.db.commit()
+            return _public_user(user_row)
+
+    def purge_expired_resets(self) -> int:
+        with self.lock:
+            cur = self.db.execute("DELETE FROM password_resets WHERE expires_at < ?",
+                                  (time.time() - 86400,))
+            self.db.commit()
+            return int(cur.rowcount or 0)
+
     def delete_user(self, user_id: int) -> dict | None:
         with self.lock:
             row = self.db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
@@ -338,5 +441,6 @@ class AuthStore:
             user = _public_user(row)
             self.db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
             self.db.execute("DELETE FROM users WHERE id=?", (user_id,))
+            self.db.execute("DELETE FROM password_resets WHERE user_id=?", (user_id,))
             self.db.commit()
             return user

@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import analysis, analytics, geo, parsers, routebook
+from . import mail as mailer
 from .auth import AuthError, AuthStore
 from .coach import evaluate as coach_evaluate
 from .coach import plan as coach_plan
@@ -440,6 +441,50 @@ def make_handler(app: App):
                 body = self.read_json()
                 auth.set_registration_open(bool(body.get("open")))
                 return self.send_json({"registration_open": auth.registration_open()})
+
+            if path == "/api/auth/forgot":
+                if method != "POST":
+                    raise ApiError("需要 POST", 405)
+                if auth.reset_fail_count(ip) >= 5:
+                    raise ApiError("请求太频繁，请 15 分钟后再试", 429)
+                auth.record_reset_request(ip)
+                body = self.read_json()
+                email = (body.get("email") or "").strip()
+                user = auth.user_by_email(email) if email else None
+                mail_sent = False
+                dev_code = None
+                if user:
+                    code = auth.create_reset(user["id"], email)
+                    try:
+                        mailer.send_reset_code(auth, email, code)
+                        mail_sent = True
+                    except mailer.MailError as exc:
+                        print(f"[邮件] 发送失败 {email}: {exc}")
+                        print(f"[邮件] {email} 的重置码：{code}（10 分钟内有效）")
+                    if os.environ.get("PACE_DEV_CODE") == "1":
+                        dev_code = code
+                # 邮箱存不存在都返回同样形状，避免被拿来枚举账号
+                return self.send_json({"ok": True, "mail_sent": mail_sent, "dev_code": dev_code})
+
+            if path == "/api/auth/reset":
+                if method != "POST":
+                    raise ApiError("需要 POST", 405)
+                body = self.read_json()
+                user = auth.consume_reset(body.get("email") or "", body.get("code") or "",
+                                          body.get("new_password") or "")
+                return self.send_json({"ok": True, "user": user})
+
+            if path == "/api/auth/smtp":
+                user = auth.session_user(self._auth_token())
+                if not user or user["role"] != "owner":
+                    raise ApiError("只有站长能改发信配置", 403)
+                if method == "GET":
+                    return self.send_json(mailer.public_config(auth))
+                body = self.read_json()
+                mailer.save_config(auth, body)
+                if body.get("test_to"):
+                    mailer.send_test(auth, str(body["test_to"]))
+                return self.send_json(mailer.public_config(auth))
 
             raise ApiError("未知接口 " + path, 404)
 

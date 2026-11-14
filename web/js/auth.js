@@ -1,115 +1,223 @@
-/* 账号门禁：未登录时挡住整个应用，只给登录/注册。 */
+/* 账号门禁 + 登录/注册/忘记密码/重置密码 四个页面。 */
 (function () {
-  const state = { status: null, mode: 'login', busy: false, error: '', notice: '' };
+  const PAGES = {
+    login: { title: '欢迎回来', sub: '登录后继续看你的训练数据', action: '登录' },
+    register: { title: '创建账号', sub: '每人一个独立数据库，互不可见', action: '注册' },
+    forgot: { title: '找回密码', sub: '填注册邮箱，我们把验证码发给你', action: '发送验证码' },
+    reset: { title: '重置密码', sub: '输入邮箱收到的 6 位验证码', action: '重置密码' },
+  };
+  const state = { status: null, busy: false, error: '', notice: '', email: '', cooldown: 0 };
+
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function currentPage() {
+    const name = (location.hash || '').replace(/^#\/?/, '').split('?')[0];
+    return PAGES[name] ? name : 'login';
+  }
+
+  function go(page) {
+    state.error = '';
+    if (location.hash === '#/' + page) render();
+    else location.hash = '#/' + page;
+  }
 
   function gateEl() { return document.getElementById('authGate'); }
 
-  function esc(value) {
-    return String(value == null ? '' : value).replace(/[&<>"']/g,
-      ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  function lock(on) {
+    document.body.classList.toggle('auth-locked', !!on);
+    const g = gateEl();
+    if (g) g.hidden = !on;
   }
 
-  function authLock(locked) {
-    document.body.classList.toggle('auth-locked', !!locked);
-    const g = gateEl();
-    if (g) g.hidden = !locked;
+  const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true">
+    <path d="M4 22 L11 11 L17 18 L23 8 L28 15" fill="none" stroke="currentColor"
+      stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="23" cy="8" r="2.6" fill="currentColor"/></svg>`;
+
+  function field(label, name, opts) {
+    const o = opts || {};
+    return `<label class="auth-field">
+      <span>${esc(label)}${o.optional ? '<i class="auth-opt">可选</i>' : ''}</span>
+      <input class="control" name="${name}" type="${o.type || 'text'}"
+        ${o.required === false ? '' : 'required'}
+        autocomplete="${o.autocomplete || 'off'}"
+        placeholder="${esc(o.placeholder || '')}"
+        ${o.value ? 'value="' + esc(o.value) + '"' : ''}
+        ${o.maxlength ? 'maxlength="' + o.maxlength + '"' : ''}>
+    </label>`;
+  }
+
+  function formHtml(page) {
+    const s = state.status || {};
+    if (page === 'login') {
+      return field('用户名或邮箱', 'username', { autocomplete: 'username', placeholder: '输入用户名' })
+        + field('密码', 'password', { type: 'password', autocomplete: 'current-password', placeholder: '输入密码' })
+        + `<label class="auth-check"><input type="checkbox" name="remember" checked> 记住我（60 天不用重登）</label>`;
+    }
+    if (page === 'register') {
+      return field('用户名', 'username', { autocomplete: 'username', placeholder: '2–24 个字符，中英文/数字/下划线', value: state.username })
+        + field('邮箱', 'email', { type: 'email', autocomplete: 'email', placeholder: '用来找回密码，建议填', optional: true })
+        + field('密码', 'password', { type: 'password', autocomplete: 'new-password', placeholder: '至少 8 位，字母+数字' })
+        + field('确认密码', 'password2', { type: 'password', autocomplete: 'new-password', placeholder: '再输一次' });
+    }
+    if (page === 'forgot') {
+      return field('注册邮箱', 'email', { type: 'email', autocomplete: 'email', placeholder: '你注册时填的邮箱' });
+    }
+    return field('注册邮箱', 'email', { type: 'email', autocomplete: 'email', placeholder: '你注册时填的邮箱', value: state.email })
+      + field('验证码', 'code', { placeholder: '6 位数字', maxlength: 6 })
+      + field('新密码', 'password', { type: 'password', autocomplete: 'new-password', placeholder: '至少 8 位，字母+数字' })
+      + field('确认新密码', 'password2', { type: 'password', autocomplete: 'new-password', placeholder: '再输一次' });
+  }
+
+  function footerHtml(page) {
+    if (page === 'login') {
+      return `<div class="auth-links">
+        <button type="button" class="linklike" data-go="forgot">忘记密码？</button>
+        <span class="auth-sep">·</span>
+        <button type="button" class="linklike" data-go="register">注册新账号</button>
+      </div>`;
+    }
+    if (page === 'register') {
+      return `<div class="auth-links">已有账号？<button type="button" class="linklike" data-go="login">去登录</button></div>`;
+    }
+    if (page === 'forgot') {
+      return `<div class="auth-links">
+        <button type="button" class="linklike" data-go="login">返回登录</button>
+        <span class="auth-sep">·</span>
+        <button type="button" class="linklike" data-go="reset">已有验证码，去重置</button>
+      </div>`;
+    }
+    return `<div class="auth-links">
+      <button type="button" class="linklike" data-go="forgot">重新获取验证码</button>
+      <span class="auth-sep">·</span>
+      <button type="button" class="linklike" data-go="login">返回登录</button>
+    </div>`;
   }
 
   function render() {
     const g = gateEl();
     if (!g) return;
+    const page = currentPage();
+    const meta = PAGES[page];
     const s = state.status || {};
-    const isSetup = !!s.needs_setup;
-    const isLogin = state.mode === 'login' && !isSetup;
-
-    const title = isSetup ? '创建站长账号' : (isLogin ? '登录 PACE' : '注册新账号');
-    const sub = isSetup
-      ? (s.legacy_pending
-        ? '这台机器上已有数据：创建账号后，原有活动、路书、设置都会迁进这个账号。'
-        : '第一次使用，先给自己建一个账号。')
-      : (isLogin ? '用你的账号登录，数据只属于你。' : '注册后拥有独立的数据库，别人看不到你的数据。');
 
     g.innerHTML = `
-      <div class="auth-panel">
-        <div class="auth-brand">
-          <span class="brand-mark">
-            <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 22 L11 11 L17 18 L23 8 L28 15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="23" cy="8" r="2.6" fill="currentColor"/></svg>
-          </span>
-          <span class="brand-text"><b>PACE</b><small>运动数据分析</small></span>
-        </div>
-        <div class="card auth-card">
-          <h1 class="auth-title">${esc(title)}</h1>
-          <p class="tiny dim auth-sub">${esc(sub)}</p>
-          ${state.error ? `<p class="auth-error">${esc(state.error)}</p>` : ''}
-          <form id="authForm" autocomplete="on">
-            <label class="auth-field">用户名
-              <input class="control" name="username" autocomplete="username" required
-                     placeholder="2–24 个字符" value="${esc(state.username || '')}">
-            </label>
-            ${isLogin ? '' : `
-            <label class="auth-field">邮箱（可选）
-              <input class="control" name="email" type="email" autocomplete="email" placeholder="找回密码用，可留空">
-            </label>`}
-            <label class="auth-field">密码
-              <input class="control" name="password" type="password" required
-                     autocomplete="${isLogin ? 'current-password' : 'new-password'}"
-                     placeholder="至少 8 位，字母+数字">
-            </label>
-            ${isLogin ? `
-            <label class="auth-check">
-              <input type="checkbox" name="remember" checked> 记住我（60 天不用重登）
-            </label>` : `
-            <label class="auth-field">确认密码
-              <input class="control" name="password2" type="password" required autocomplete="new-password">
-            </label>`}
-            <button class="btn btn-primary btn-block" type="submit" ${state.busy ? 'disabled' : ''}>
-              ${state.busy ? '处理中…' : (isSetup ? '创建并进入' : (isLogin ? '登录' : '注册并进入'))}
-            </button>
-          </form>
-          <div class="auth-alt tiny dim">
-            ${isSetup ? '' : (isLogin
-              ? (s.registration_open
-                ? '还没有账号？<button class="linklike" data-mode="register">注册一个</button>'
-                : '注册已关闭，找站长给你开账号')
-              : '已有账号？<button class="linklike" data-mode="login">去登录</button>')}
+      <div class="auth-shell">
+        <aside class="auth-art">
+          <div class="auth-art-grid"></div>
+          <div class="auth-art-glow"></div>
+          <div class="auth-art-inner">
+            <div class="auth-logo">${LOGO}<b>PACE</b></div>
+            <h2>把每一次骑行<br><em>都算清楚</em></h2>
+            <p class="auth-art-sub">本地优先的运动数据分析 · 自托管</p>
+            <ul class="auth-points">
+              <li><i class="pt-dot"></i>每人一个独立数据库，物理隔离</li>
+              <li><i class="pt-dot"></i>GPX / FIT / TCX / CSV 直接导入</li>
+              <li><i class="pt-dot"></i>教练计划、路书规划、爬坡分级</li>
+            </ul>
           </div>
-        </div>
-        <p class="tiny dim auth-foot">数据存在这台服务器上 · 每个账号独立</p>
+          <div class="auth-art-foot">v1.1 · 数据只存在这台服务器上</div>
+        </aside>
+
+        <main class="auth-main">
+          <div class="auth-box">
+            <h1>${esc(meta.title)}</h1>
+            <p class="auth-sub">${esc(meta.sub)}</p>
+            ${s.needs_setup && page === 'register'
+              ? `<p class="auth-hint">这台机器上已有旧数据，创建后会自动迁进这个账号。</p>` : ''}
+            ${page === 'register' && s.registration_open === false
+              ? `<p class="auth-hint warn">站长关闭了注册，需要账号请找站长开。</p>` : ''}
+            ${state.error ? `<p class="auth-error">${esc(state.error)}</p>` : ''}
+            ${state.notice ? `<p class="auth-notice">${esc(state.notice)}</p>` : ''}
+            <form id="authForm" novalidate>
+              ${formHtml(page)}
+              <button class="btn btn-primary btn-block auth-submit" type="submit" ${state.busy ? 'disabled' : ''}>
+                ${state.busy ? '请稍候…' : (state.cooldown > 0 ? state.cooldown + ' 秒后可重发' : meta.action)}
+              </button>
+            </form>
+            ${footerHtml(page)}
+          </div>
+        </main>
       </div>`;
 
     const form = g.querySelector('#authForm');
     form.addEventListener('submit', onSubmit);
-    g.querySelectorAll('[data-mode]').forEach(btn => {
-      btn.addEventListener('click', () => { state.mode = btn.dataset.mode; state.error = ''; render(); });
+    g.querySelectorAll('[data-go]').forEach(btn => {
+      btn.addEventListener('click', () => go(btn.dataset.go));
     });
-    const first = form.querySelector('input[name=username]');
+    const first = form.querySelector('input[name=username], input[name=email]');
     if (first) first.focus();
+  }
+
+  function cooldownTick() {
+    if (state.cooldown > 0) {
+      state.cooldown -= 1;
+      const btn = gateEl() && gateEl().querySelector('.auth-submit');
+      if (btn && !state.busy) btn.textContent = state.cooldown + ' 秒后可重发';
+      setTimeout(cooldownTick, 1000);
+    } else if (gateEl()) {
+      render();
+    }
   }
 
   async function onSubmit(event) {
     event.preventDefault();
     if (state.busy) return;
+    const page = currentPage();
     const form = event.target;
     const data = new FormData(form);
-    const username = String(data.get('username') || '').trim();
-    const password = String(data.get('password') || '');
-    const isSetup = !!(state.status || {}).needs_setup;
-    const isLogin = state.mode === 'login' && !isSetup;
-    state.username = username;
+    const get = (k) => String(data.get(k) || '').trim();
     state.error = '';
-    if (!isLogin) {
-      const again = String(data.get('password2') || '');
-      if (password !== again) { state.error = '两次输入的密码不一样'; render(); return; }
-    }
+    state.notice = '';
     state.busy = true;
-    render();
+
     try {
-      if (isLogin) {
-        await api.login({ username, password, remember: !!data.get('remember') });
-      } else {
-        await api.register({ username, password, email: String(data.get('email') || '').trim() });
+      if (page === 'login') {
+        await api.login({ username: get('username'), password: String(data.get('password') || ''),
+                          remember: !!data.get('remember') });
+        state.busy = false;
+        location.hash = '#/';
+        location.reload();
+        return;
       }
-      location.reload();
+      if (page === 'register') {
+        if (get('password') !== get('password2')) throw new Error('两次输入的密码不一样');
+        await api.register({ username: get('username'), email: get('email'),
+                             password: get('password') });
+        state.busy = false;
+        location.hash = '#/';
+        location.reload();
+        return;
+      }
+      if (page === 'forgot') {
+        const res = await api.forgotPassword({ email: get('email') });
+        state.busy = false;
+        state.email = get('email');
+        if (res && res.dev_code) {
+          state.notice = '测试模式：验证码 ' + res.dev_code + '（10 分钟内有效）';
+        } else if (res && res.mail_sent) {
+          state.notice = '验证码已发到 ' + get('email') + '，10 分钟内有效。';
+        } else {
+          state.notice = '如果这个邮箱注册过，验证码会发到邮箱里。';
+        }
+        state.cooldown = 60;
+        render();
+        cooldownTick();
+        return;
+      }
+      // reset
+      if (get('password') !== get('password2')) throw new Error('两次输入的密码不一样');
+      await api.resetPassword({ email: get('email'), code: get('code'),
+                                new_password: get('password') });
+      state.busy = false;
+      if (window.UI && UI.toast) UI.toast('密码已重置，请用新密码登录', 'ok');
+      state.notice = '密码已重置，正在跳转登录…';
+      render();
+      setTimeout(() => go('login'), 900);
+      return;
     } catch (err) {
       state.busy = false;
       state.error = err.message || '请求失败';
@@ -121,26 +229,29 @@
     try {
       state.status = await api.authStatus();
     } catch (err) {
-      // 服务没起来：让 app.js 走原来的错误提示
       return true;
     }
     if (state.status && state.status.user) {
       window.PaceUser = state.status.user;
-      authLock(false);
+      lock(false);
       return true;
     }
-    state.mode = state.status.needs_setup ? 'register' : 'login';
-    authLock(true);
+    lock(true);
+    if (!PAGES[currentPage()]) location.hash = '#/login';
     render();
+    window.addEventListener('hashchange', () => {
+      if (!document.body.classList.contains('auth-locked')) return;
+      render();
+    });
     return false;
   }
 
   async function logout() {
     try { await api.logout(); } catch (err) { /* ignore */ }
+    location.hash = '#/login';
     location.reload();
   }
 
-  /* 顶栏上的账号按钮 + 改密对话框 */
   function openAccount() {
     const user = window.PaceUser || {};
     const dlg = document.createElement('dialog');
@@ -151,17 +262,19 @@
         <button class="icon-btn" value="cancel" aria-label="关闭"><span data-icon="x"></span></button>
       </form>
       <div class="dialog-body">
-        <p class="tiny dim" style="margin-bottom:12px">
-          当前账号：<b>${esc(user.username)}</b>${user.role === 'owner' ? ' · 站长' : ''}
-        </p>
-        <form id="pwdForm" style="display:flex;flex-direction:column;gap:8px">
-          <label class="auth-field">原密码
-            <input class="control" name="old_password" type="password" required autocomplete="current-password">
-          </label>
-          <label class="auth-field">新密码
-            <input class="control" name="new_password" type="password" required
-                   autocomplete="new-password" placeholder="至少 8 位，字母+数字">
-          </label>
+        <div class="auth-account">
+          <div class="auth-avatar">${esc((user.username || '?').slice(0, 1).toUpperCase())}</div>
+          <div>
+            <b>${esc(user.username)}</b>
+            <div class="tiny dim">${user.role === 'owner' ? '站长' : '成员'} · ${esc(user.email || '没填邮箱')}</div>
+          </div>
+        </div>
+        <form id="pwdForm" style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+          <label class="auth-field"><span>原密码</span>
+            <input class="control" name="old_password" type="password" required autocomplete="current-password"></label>
+          <label class="auth-field"><span>新密码</span>
+            <input class="control" name="new_password" type="password" required autocomplete="new-password"
+                   placeholder="至少 8 位，字母+数字"></label>
           <button class="btn btn-primary" type="submit">改密码</button>
         </form>
         <div class="row" style="gap:8px;justify-content:flex-end;margin-top:14px">
@@ -174,10 +287,7 @@
       ev.preventDefault();
       const fd = new FormData(ev.target);
       try {
-        await api.changePassword({
-          old_password: fd.get('old_password'),
-          new_password: fd.get('new_password'),
-        });
+        await api.changePassword({ old_password: fd.get('old_password'), new_password: fd.get('new_password') });
         UI.toast('密码已改，请重新登录', 'ok');
         setTimeout(() => location.reload(), 700);
       } catch (err) {
@@ -195,23 +305,15 @@
     const right = document.querySelector('.topbar-right');
     if (!right || document.getElementById('btnUser')) return;
     const btn = document.createElement('button');
-    btn.className = 'btn btn-sm btn-ghost auth-chip';
+    btn.className = 'auth-chip';
     btn.id = 'btnUser';
     btn.title = '账号设置 / 退出';
-    btn.textContent = user.username;
+    btn.innerHTML = `<span class="auth-chip-avatar">${esc((user.username || '?').slice(0, 1).toUpperCase())}</span><span class="auth-chip-name">${esc(user.username)}</span>`;
     btn.addEventListener('click', openAccount);
     right.appendChild(btn);
   }
 
-  // 任何接口返回 401：说明会话过期，重新走门禁
-  window.addEventListener('pace:unauth', () => { location.reload(); });
+  window.addEventListener('pace:unauth', () => { location.hash = '#/login'; location.reload(); });
 
-  window.Auth = {
-    boot,
-    logout,
-    mountChip,
-    openAccount,
-    user: () => window.PaceUser || null,
-    esc,
-  };
+  window.Auth = { boot, logout, mountChip, openAccount, esc, user: () => window.PaceUser || null };
 })();

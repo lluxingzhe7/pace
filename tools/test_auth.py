@@ -289,6 +289,60 @@ def test_http():
         app.auth.close()
 
 
+
+def test_reset_flow():
+    print("\n[6] 邮箱找回密码")
+    d = fresh_dir("reset")
+    db = os.path.join(d, "pace.db")
+    httpd, app = build_server(db, os.path.join(ROOT, "web"), 0, auth_required=True)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    os.environ["PACE_DEV_CODE"] = "1"
+    try:
+        c = Client(base)
+        c.post("/api/auth/register", {"username": "resetuser", "password": "abc12345",
+                                      "email": "reset@example.com"})
+        c.post("/api/auth/logout")
+        anon = Client(base)
+
+        status, body = anon.post("/api/auth/forgot", {"email": "reset@example.com"})
+        code = body.get("dev_code") or ""
+        check("忘记密码返回验证码（测试模式）", status == 200 and len(code) == 6, str(body)[:80])
+
+        status, body2 = anon.post("/api/auth/forgot", {"email": "nobody@example.com"})
+        check("不存在的邮箱也返回同样的形状", status == 200 and body2.get("ok") is True
+              and body2.get("dev_code") is None, str(body2)[:80])
+
+        status, _ = anon.post("/api/auth/reset", {"email": "reset@example.com",
+                                                  "code": "000000", "new_password": "xyz98765"})
+        check("错误验证码被拒", status == 400, str(status))
+
+        status, _ = anon.post("/api/auth/reset", {"email": "reset@example.com",
+                                                  "code": code, "new_password": "short"})
+        check("新密码太弱被拒", status == 400, str(status))
+
+        status, _ = anon.post("/api/auth/reset", {"email": "reset@example.com",
+                                                  "code": code, "new_password": "xyz98765"})
+        check("正确验证码能重置", status == 200, str(status))
+
+        status, _ = anon.post("/api/auth/login", {"username": "resetuser", "password": "abc12345"})
+        check("旧密码登录失败", status == 401, str(status))
+        status, body = anon.post("/api/auth/login", {"username": "resetuser", "password": "xyz98765"})
+        check("新密码登录成功", status == 200, str(status))
+        status, _ = anon.post("/api/auth/login", {"username": "reset@example.com", "password": "xyz98765"})
+        check("可以用邮箱登录", status == 200, str(status))
+
+        status, _ = anon.post("/api/auth/reset", {"email": "reset@example.com",
+                                                  "code": code, "new_password": "another2026"})
+        check("验证码只能用一次", status == 400, str(status))
+    finally:
+        os.environ.pop("PACE_DEV_CODE", None)
+        httpd.shutdown()
+        with app._ctx_lock:
+            for ctx in list(app._contexts.values()):
+                ctx.close()
+        app.auth.close()
+
 def main() -> int:
     print("=" * 58)
     print("账号体系测试")
@@ -300,6 +354,7 @@ def main() -> int:
     test_sessions()
     test_rate_limit()
     test_http()
+    test_reset_flow()
     shutil.rmtree(TMP, ignore_errors=True)
     print("\n" + "=" * 58)
     if FAILED:

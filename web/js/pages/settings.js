@@ -3,9 +3,55 @@
   const state = { settings: null, health: null };
   let host = null;
 
+  function smtpCard(smtp) {
+    return `        <div class="card" style="grid-column:1/-1">
+          <div class="card-head"><h3>邮件发信（找回密码）</h3>
+            <span class="dim">${smtp.configured ? '已配置：' + U.esc(smtp.from || '') : '未配置：验证码只会写进服务端日志'}</span></div>
+          <div class="card-body">
+            <div class="grid g-4">
+              <label class="tiny dim">SMTP 服务器
+                <input id="setSmtpHost" class="control" style="width:100%;margin-top:6px"
+                  placeholder="smtp.qq.com" value="${U.esc(smtp.host || '')}">
+              </label>
+              <label class="tiny dim">端口
+                <input id="setSmtpPort" type="number" class="control" style="width:100%;margin-top:6px"
+                  placeholder="465" value="${U.esc(String(smtp.port || ''))}">
+              </label>
+              <label class="tiny dim">加密方式
+                <select id="setSmtpSecure" class="control" style="width:100%;margin-top:6px">
+                  <option value="ssl" ${smtp.secure === 'starttls' ? '' : 'selected'}>SSL（常用 465）</option>
+                  <option value="starttls" ${smtp.secure === 'starttls' ? 'selected' : ''}>STARTTLS（常用 587）</option>
+                </select>
+              </label>
+              <label class="tiny dim">发件人地址
+                <input id="setSmtpFrom" class="control" style="width:100%;margin-top:6px"
+                  placeholder="noreply@example.com" value="${U.esc(smtp.from || '')}">
+              </label>
+              <label class="tiny dim">账号
+                <input id="setSmtpUser" class="control" style="width:100%;margin-top:6px"
+                  placeholder="一般同发件人" value="${U.esc(smtp.user || '')}">
+              </label>
+              <label class="tiny dim">授权码 / 密码
+                <input id="setSmtpPass" type="password" autocomplete="off" class="control"
+                  style="width:100%;margin-top:6px" placeholder="已设置则留空表示不修改">
+              </label>
+            </div>
+            <p class="tiny dim" style="margin-top:10px">QQ 邮箱要填「授权码」而不是登录密码；云厂商的邮件推送也可以直接用它的 SMTP 地址。</p>
+            <div class="row" style="margin-top:12px;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-primary" id="btnSaveSmtp">保存发信配置</button>
+              <input id="setSmtpTest" class="control" placeholder="测试收件邮箱" style="width:210px">
+              <button class="btn" id="btnTestSmtp">发测试邮件</button>
+            </div>
+          </div>
+        </div>
+`;
+  }
+
   function render() {
     const s = state.settings || {};
     const h = state.health || {};
+    const smtp = state.smtp || {};
+    const isOwner = (window.PaceUser || {}).role === 'owner';
     host.innerHTML = `
       <div class="section-head" style="margin-top:0">
         <h2>设置</h2>
@@ -75,6 +121,7 @@
           </div>
         </div>
 
+        ${isOwner ? smtpCard(smtp) : ''}
         <div class="card">
           <div class="card-head"><h3>训练阈值</h3><span class="dim">专项指标的基准值</span></div>
           <div class="card-body">
@@ -428,13 +475,57 @@
     });
   }
 
+
+    const btnSmtp = document.getElementById('btnSaveSmtp');
+    if (btnSmtp) {
+      const smtpPayload = () => {
+        const payload = {
+          host: document.getElementById('setSmtpHost').value.trim(),
+          port: Number(document.getElementById('setSmtpPort').value) || undefined,
+          secure: document.getElementById('setSmtpSecure').value,
+          from: document.getElementById('setSmtpFrom').value.trim(),
+          user: document.getElementById('setSmtpUser').value.trim(),
+        };
+        const pass = document.getElementById('setSmtpPass').value;
+        if (pass) payload.password = pass;
+        return payload;
+      };
+      btnSmtp.addEventListener('click', async () => {
+        try {
+          state.smtp = await api.saveSmtp(smtpPayload());
+          UI.toast('发信配置已保存', 'ok');
+          render();
+        } catch (err) {
+          UI.toast('保存失败：' + U.esc(err.message), 'err');
+        }
+      });
+      document.getElementById('btnTestSmtp').addEventListener('click', async () => {
+        const to = document.getElementById('setSmtpTest').value.trim();
+        if (!to) {
+          UI.toast('先填一个收件邮箱', 'err');
+          return;
+        }
+        try {
+          await api.saveSmtp(Object.assign(smtpPayload(), { test_to: to }));
+          UI.toast('测试邮件已发出，去收件箱看看（也可能在垃圾箱）', 'ok');
+        } catch (err) {
+          UI.toast('发送失败：' + U.esc(err.message), 'err');
+        }
+      });
+    }
+
   async function load(root) {
     host = root;
     root.innerHTML = UI.spinner('读取设置…');
     try {
-      const [settings, health] = await Promise.all([api.settings(), api.health()]);
+      const isOwner = (window.PaceUser || {}).role === 'owner';
+      const [settings, health, smtp] = await Promise.all([
+        api.settings(), api.health(),
+        isOwner ? api.smtpStatus().catch(() => null) : Promise.resolve(null),
+      ]);
       state.settings = settings.settings;
       state.health = health;
+      state.smtp = smtp || null;
       if (state.settings.theme) document.documentElement.dataset.theme = state.settings.theme;
       render();
     } catch (err) {
