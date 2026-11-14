@@ -3,6 +3,28 @@
   const state = { settings: null, health: null };
   let host = null;
 
+  function commandCard() {
+    let saved = '';
+    try { saved = localStorage.getItem('pace.remote') || ''; } catch (e) { saved = ''; }
+    return `        <div class="card" style="grid-column:1/-1">
+          <div class="card-head"><h3>连接电脑版</h3>
+            <span class="dim">同一 WiFi 下直接看电脑上的数据，不用搬文件</span></div>
+          <div class="card-body">
+            <p class="tiny dim" style="line-height:1.7;margin-bottom:10px">
+              电脑上双击 <b>启动PACE-手机.bat</b>，窗口里会打印「手机 http://192.168.x.x:8765」，
+              把那个地址填到这里，就连到电脑上的同一份数据（需要先在电脑上登录）。
+            </p>
+            <div class="row" style="gap:8px">
+              <input id="setRemote" class="control" style="flex:1;min-width:180px"
+                placeholder="http://192.168.3.22:8765" value="${U.esc(saved)}">
+              <button class="btn" id="btnRemote">连接</button>
+            </div>
+            <p class="tiny dim" style="margin-top:8px">退出登录/断开：直接用浏览器开的电脑版页面即可，本机数据不受影响。</p>
+          </div>
+        </div>
+`;
+  }
+
   function smtpCard(smtp) {
     return `        <div class="card" style="grid-column:1/-1">
           <div class="card-head"><h3>邮件发信（找回密码）</h3>
@@ -123,6 +145,7 @@
         </div>
 
         ${isOwner ? smtpCard(smtp) : ''}
+        ${isStatic ? commandCard() : ''}
         <div class="card">
           <div class="card-head"><h3>训练阈值</h3><span class="dim">专项指标的基准值</span></div>
           <div class="card-body">
@@ -562,6 +585,21 @@
     }
   }
 
+  function wireRemote() {
+    const btn = document.getElementById('btnRemote');
+    const input = document.getElementById('setRemote');
+    if (!btn || !input) return;
+    btn.addEventListener('click', async () => {
+      let url = (input.value || '').trim();
+      if (!url) { UI.toast('先填电脑上的地址', 'err'); return; }
+      if (!/^https?:\/\//.test(url)) url = 'http://' + url;
+      url = url.replace(/\/+$/, '');
+      try { localStorage.setItem('pace.remote', url); } catch (e) { /* ignore */ }
+      // 浏览器安全策略：HTTPS 页面不能跨域读取局域网 HTTP，只能直接跳转过去
+      location.href = url + '/';
+    });
+  }
+
   async function load(root) {
     host = root;
     root.innerHTML = UI.spinner('读取设置…');
@@ -576,7 +614,7 @@
       state.smtp = smtp || null;
       if (state.settings.theme) document.documentElement.dataset.theme = state.settings.theme;
       render();
-      if (window.PACE_STATIC) wireStaticBackup();
+      if (window.PACE_STATIC) { wireStaticBackup(); wireRemote(); }
     } catch (err) {
       root.innerHTML = `<div class="card">${UI.empty('info', '加载失败', U.esc(err.message))}</div>`;
     }
