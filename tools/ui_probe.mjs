@@ -140,6 +140,13 @@ async function main() {
       await cdp.send('Page.navigate', { url: step.navigate });
       await Promise.race([p, sleep(8000)]);
       await sleep(500);
+    } else if (step.viewport) {
+      const [vw, vh] = step.viewport;
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: vw, height: vh, deviceScaleFactor: 2, mobile: true,
+      });
+      await sleep(600);
+      report.steps.push({ viewport: [vw, vh] });
     } else if (step.shot) {
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
       const file = join(outDir, `${step.shot}.png`);

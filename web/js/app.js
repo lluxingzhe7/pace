@@ -81,6 +81,12 @@
     U.$$('.nav a[data-nav]').forEach(a => {
       a.classList.toggle('active', a.dataset.nav === key);
     });
+    const tabs = document.getElementById('mobileTabs');
+    if (tabs) {
+      U.$$('a[data-nav]', tabs).forEach(a => {
+        a.classList.toggle('active', a.dataset.nav === key);
+      });
+    }
   }
 
   function setSportNav(sport) {
