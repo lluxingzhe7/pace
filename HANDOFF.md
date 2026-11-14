@@ -1403,6 +1403,15 @@ W1 节奏骑 21.5 km + 百公里长距离 40.5 km；W13 减量周 60 km（比峰
 - 数据源同步、Strava、LLM 在纯前端模式不可用（已隐藏/报错）
 - GitHub Pages 默认没开，需要站长在 Settings → Pages 里把 Source 选成 GitHub Actions
 
+### 收尾（2026-11-14 晚）
+
+- 线上：<https://lluxingzhe7.github.io/pace/>，冷启动 27.1s、热启动 4.1s（SW 缓存 jsdelivr 运行时）。
+- 启动分阶段进度条 + 失败重试；缓存键由 Pages 工作流注入提交 SHA，发版即刷新。
+- AI 教练在浏览器可用：DeepSeek 允许跨域（实测 preflight 返回 ACAO），
+  `llm.py` 在 Pyodide 下改用同步 XHR；用假 Key 实测返回「API Key 无效（401）」，链路正确。
+- 回归：auth 62 / llm 35 / selftest 79 / routebook 83 全绿。
+
+
 - **发版自动化**：`.github/workflows/release.yml` —— 推 `v*` 标签后 GitHub Actions 自动建 Release 并挂 `pace-<tag>-src.zip`，不用再手动拖附件（v0.1 是手动建的）。
 - v0.1 Release 已发布：<https://github.com/lluxingzhe7/pace/releases/tag/v0.1>（附件 `pace-v0.1-src.zip`，SHA256 `d5560772…cea4`，105 个条目）。
 
