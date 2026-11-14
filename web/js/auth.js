@@ -226,8 +226,6 @@
   }
 
   async function boot() {
-    // 纯前端模式没有账号系统：数据就在这台设备的浏览器里
-    if (window.PACE_STATIC) return true;
     try {
       state.status = await api.authStatus();
     } catch (err) {
@@ -239,7 +237,12 @@
       return true;
     }
     lock(true);
-    if (!PAGES[currentPage()]) location.hash = '#/login';
+    // 第一次用（或还没账号）直接进注册页，别停在登录页
+    if (state.status && state.status.needs_setup) {
+      location.hash = '#/register';
+    } else if (!PAGES[currentPage()]) {
+      location.hash = '#/login';
+    }
     render();
     window.addEventListener('hashchange', () => {
       if (!document.body.classList.contains('auth-locked')) return;

@@ -8,7 +8,8 @@
  */
 (function () {
   const PYODIDE_CDN = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
-  const state = { py: null, ready: false, booting: null, db: null };
+  const state = { py: null, ready: false, booting: null, db: null, user: 'default' };
+  function dbKey() { return 'db:' + (state.user || 'default'); }
   // 先抓住原始 fetch，免得被后面的 shim 换掉后自己调不到
   const rawFetch = window.fetch.bind(window);
 
@@ -20,10 +21,11 @@
 
   function idb() {
     return new Promise((resolve, reject) => {
-      const req = indexedDB.open('pace-web', 1);
+      const req = indexedDB.open('pace-web', 2);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains('users')) db.createObjectStore('users', { keyPath: 'username' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -109,8 +111,9 @@
     });
   }
 
-  async function boot() {
+  async function boot(userKey) {
     if (!enabled()) return false;
+    if (userKey) state.user = String(userKey);
     if (state.ready) return true;
     if (state.booting) return state.booting;
     state.booting = (async () => {
@@ -134,14 +137,13 @@
 
       overlay('⑤ 恢复本地数据…', 92);
       py.runPython("import os\nos.makedirs('/data', exist_ok=True)");
-      const saved = await idbGet('db');
+      const saved = await idbGet(dbKey());
       if (saved && saved.byteLength) {
         py.FS.writeFile('/data/pace.db', new Uint8Array(saved));
       }
       const info = py.runPython(
         "import json\nfrom pace import webbridge\njson.dumps(webbridge.init('/data/pace.db'))");
       state.db = JSON.parse(info);
-      installFetchShim();
       state.ready = true;
       hideOverlay();
       console.log('[PACE] 引擎就绪，用时 ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒');
@@ -172,10 +174,21 @@
     if (!result.db_b64) return;
     try {
       const bytes = b64ToBytes(result.db_b64);
-      await idbSet('db', bytes.buffer);
+      await idbSet(dbKey(), bytes.buffer);
     } catch (err) {
       console.error('保存数据库失败', err);
     }
+  }
+
+  async function readBody(init) {
+    if (!init || init.body == null) return { b64: '', text: '' };
+    if (typeof init.body === 'string') {
+      return { b64: bytesToB64(new TextEncoder().encode(init.body)), text: init.body };
+    }
+    if (init.body instanceof ArrayBuffer) return { b64: bytesToB64(init.body), text: '' };
+    if (ArrayBuffer.isView(init.body)) return { b64: bytesToB64(init.body.buffer), text: '' };
+    const txt = String(init.body);
+    return { b64: bytesToB64(new TextEncoder().encode(txt)), text: txt };
   }
 
   function installFetchShim() {
@@ -183,17 +196,30 @@
     window.__paceFetchRaw = rawFetch;
     window.fetch = async function (input, init) {
       const url = typeof input === 'string' ? input : (input && input.url) || '';
-      if (url.indexOf('/api/') !== 0) return raw(input, init);
+      if (url.indexOf('/api/') !== 0) return rawFetch(input, init);
       const method = ((init && init.method) || 'GET').toUpperCase();
       const headers = Object.assign({}, (init && init.headers) || {});
-      let bodyB64 = '';
-      if (init && init.body != null) {
-        if (typeof init.body === 'string') bodyB64 = bytesToB64(new TextEncoder().encode(init.body));
-        else if (init.body instanceof ArrayBuffer) bodyB64 = bytesToB64(init.body);
-        else if (ArrayBuffer.isView(init.body)) bodyB64 = bytesToB64(init.body.buffer);
-        else bodyB64 = bytesToB64(new TextEncoder().encode(String(init.body)));
+      const body = await readBody(init);
+
+      // 账号接口由浏览器本地实现（不需要 Python 引擎）
+      if (url.indexOf('/api/auth/') === 0 && window.PaceLocalAuth) {
+        let payload = {};
+        if (body.text) { try { payload = JSON.parse(body.text); } catch (e) { payload = {}; } }
+        const out = await window.PaceLocalAuth.handle(method, url.split('?')[0], payload);
+        return new Response(JSON.stringify(out.payload), {
+          status: out.status, headers: { 'Content-Type': 'application/json' },
+        });
       }
-      const result = pyCall(method, url, bodyB64, headers);
+
+      if (!state.ready) {
+        if (state.booting) { try { await state.booting; } catch (e) { /* 交给下面报错 */ } }
+        if (!state.ready) {
+          return new Response(JSON.stringify({ error: '引擎还没加载完，请稍候' }), {
+            status: 503, headers: { 'Content-Type': 'application/json' },
+          });
+        }
+      }
+      const result = pyCall(method, url, body.b64, headers);
       if (result.db_b64) persist(result);
       const bytes = b64ToBytes(result.body_b64 || '');
       const respHeaders = new Headers();
@@ -204,6 +230,8 @@
     };
   }
 
+  if (enabled()) installFetchShim();
+
   window.PaceWeb = {
     enabled,
     boot,
@@ -211,7 +239,7 @@
     get: idbGet,
     set: idbSet,
     reset: async () => {
-      await idbSet('db', new ArrayBuffer(0));
+      await idbSet(dbKey(), new ArrayBuffer(0));
       location.reload();
     },
   };

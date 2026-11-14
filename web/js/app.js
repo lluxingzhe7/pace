@@ -199,14 +199,18 @@
   }
 
   async function boot() {
-    // 纯前端模式：先把浏览器里的 Python 引擎拉起来
-    if (window.PaceWeb && PaceWeb.enabled()) {
+    const staticMode = !!(window.PaceWeb && PaceWeb.enabled());
+    if (staticMode) {
+      // 先过本地登录门禁，再按账号加载各自的数据库
+      const ok = await Auth.boot();
+      if (!ok) return;
       try {
-        await PaceWeb.boot();
+        await PaceWeb.boot(Auth.user() ? Auth.user().username : 'default');
       } catch (err) {
         console.error(err);
         return;
       }
+      Auth.mountChip();
     }
     UI.registerGlobalHandlers();
     UI.Importer.init();
@@ -214,8 +218,8 @@
     syncSportSwitch();
 
     if (window.PACE_STATIC) document.body.classList.add('static-mode');
-    // 没登录就只显示门禁，别初始化任何页面
-    if (window.Auth) {
+    // 服务器模式：没登录就只显示门禁
+    if (window.Auth && !staticMode) {
       const ready = await Auth.boot();
       if (!ready) return;
       Auth.mountChip();
