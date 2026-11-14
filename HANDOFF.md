@@ -1371,5 +1371,6 @@ W1 节奏骑 21.5 km + 百公里长距离 40.5 km；W13 减量周 60 km（比峰
 - GitHub Release 的 zip 需要 API token 才能自动上传（SSH 只能推 git 对象），
   所以 `dist/pace-src-YYYYMMDD.zip` 目前是手动拖进 Release 页面。
 - 第一版 tag：`v0.1`（对应「爬坡按等级筛选 + 教练骑行目标细分」这一版）。
+- **发版自动化**：`.github/workflows/release.yml` —— 推 `v*` 标签后 GitHub Actions 自动建 Release 并挂 `pace-<tag>-src.zip`，不用再手动拖附件（v0.1 是手动建的）。
 
 
