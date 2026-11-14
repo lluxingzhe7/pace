@@ -71,6 +71,8 @@ def main() -> int:
     parser.add_argument("--no-open", action="store_true")
     parser.add_argument("--seed-demo", action="store_true", help="导入 sample-data 示例数据")
     parser.add_argument("--no-auth", action="store_true", help="关闭账号系统（只给自己本机用）")
+    parser.add_argument("--host", default=os.environ.get("PACE_HOST", "127.0.0.1"),
+                        help="监听地址；容器/公网部署用 0.0.0.0")
     args = parser.parse_args()
 
     os.makedirs(os.path.dirname(os.path.abspath(args.db)), exist_ok=True)
@@ -78,9 +80,9 @@ def main() -> int:
     sys.path.insert(0, ROOT)
     from pace import server
 
-    port = server.find_free_port(args.port)
+    port = server.find_free_port(args.port, args.host)
     httpd, app = server.build_server(args.db, os.path.join(ROOT, "web"), port,
-                                     auth_required=not args.no_auth)
+                                     auth_required=not args.no_auth, host=args.host)
     url = f"http://127.0.0.1:{port}/"
     print("=" * 52)
     print("  PACE · 运动数据分析")

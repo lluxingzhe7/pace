@@ -1,0 +1,26 @@
+# 有域名时用这个：caddy 自动申请证书 + 反代
+# 用法：PACE_DOMAIN=pace.example.com docker compose -f docker-compose.yml -f docker-compose.https.yml up -d
+services:
+  pace:
+    ports: []
+    expose:
+      - "8765"
+  caddy:
+    image: caddy:2-alpine
+    container_name: pace-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PACE_DOMAIN: ${PACE_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - pace
+
+volumes:
+  caddy_data:
+  caddy_config:

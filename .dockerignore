@@ -1,0 +1,17 @@
+data/
+.ui/
+shots/
+dist/
+.deploy/
+.edge-profile*/
+.selftest-tmp/
+.auth-test/
+.coach-test/
+.program-test/
+.routebook-test/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+HANDOFF.md
+docs/

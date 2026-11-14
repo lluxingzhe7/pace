@@ -1,0 +1,16 @@
+# 域名由环境变量 PACE_DOMAIN 传入；caddy 自动申请 Let's Encrypt 证书
+{$PACE_DOMAIN:localhost} {
+	encode zstd gzip
+	reverse_proxy pace:8765 {
+		header_up X-Forwarded-Proto {scheme}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	log {
+		output stdout
+		format console
+	}
+}

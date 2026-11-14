@@ -1,0 +1,15 @@
+# 基础版：只跑 PACE，监听 8765（适合先用 IP:端口 访问）
+services:
+  pace:
+    build: .
+    image: pace:latest
+    container_name: pace
+    restart: unless-stopped
+    environment:
+      PACE_HOST: 0.0.0.0
+      PACE_TRUST_PROXY: "1"
+      PACE_QUIET: "1"
+    volumes:
+      - ./data:/data
+    ports:
+      - "8765:8765"

@@ -333,6 +333,17 @@ def make_handler(app: App):
             return (f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; "
                     f"Max-Age={ttl}{secure}")
 
+        def _client_ip(self) -> str:
+            """反代后面取真实客户端 IP（只信任我们自己配的反代）。"""
+            if os.environ.get("PACE_TRUST_PROXY") == "1":
+                forwarded = self.headers.get("X-Forwarded-For") or ""
+                if forwarded:
+                    return forwarded.split(",")[0].strip() or "127.0.0.1"
+                real = self.headers.get("X-Real-IP")
+                if real:
+                    return real.strip()
+            return self.client_address[0]
+
         def _clear_cookie(self) -> str:
             return f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
 
@@ -340,7 +351,7 @@ def make_handler(app: App):
             auth = app.auth
             if auth is None:
                 raise ApiError("这个实例没有开启账号系统", 404)
-            ip = self.client_address[0]
+            ip = self._client_ip()
 
             if path == "/api/auth/status":
                 user = auth.session_user(self._auth_token())
@@ -1507,12 +1518,12 @@ def _at(series, index):
 
 # ---------------------------------------------------------------- 启动
 
-def find_free_port(preferred: int) -> int:
+def find_free_port(preferred: int, host: str = "127.0.0.1") -> int:
     for port in range(preferred, preferred + 40):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                s.bind(("127.0.0.1", port))
+                s.bind((host, port))
                 return port
             except OSError:
                 continue
@@ -1534,10 +1545,10 @@ class QuietServer(ThreadingHTTPServer):
 
 
 def build_server(db_path: str, web_dir: str, port: int = 0, *,
-                 auth_required: bool = True) -> tuple[ThreadingHTTPServer, App]:
+                 auth_required: bool = True, host: str = "127.0.0.1") -> tuple[ThreadingHTTPServer, App]:
     app = App(db_path, web_dir, auth_required=auth_required)
     handler = make_handler(app)
-    httpd = QuietServer(("127.0.0.1", port), handler)
+    httpd = QuietServer((host, port), handler)
     httpd.daemon_threads = True
     return httpd, app
 
@@ -1551,12 +1562,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--open", action="store_true", help="启动后打开浏览器")
     parser.add_argument("--no-auth", action="store_true",
                         help="关闭账号系统（只给自己本机用，等同于旧版行为）")
+    parser.add_argument("--host", default=os.environ.get("PACE_HOST", "127.0.0.1"),
+                        help="监听地址；容器/公网部署用 0.0.0.0")
     args = parser.parse_args(argv)
 
     os.makedirs(os.path.dirname(os.path.abspath(args.db)), exist_ok=True)
-    port = find_free_port(args.port)
-    httpd, app = build_server(args.db, args.web, port, auth_required=not args.no_auth)
-    url = f"http://127.0.0.1:{httpd.server_address[1]}/"
+    port = find_free_port(args.port, args.host)
+    httpd, app = build_server(args.db, args.web, port, auth_required=not args.no_auth,
+                              host=args.host)
+    shown = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
+    url = f"http://{shown}:{httpd.server_address[1]}/"
     print(f"PACE 已启动: {url}")
     if app.auth_required:
         print(f"账号库: {os.path.join(app.data_dir, 'auth.db')}")
