@@ -239,9 +239,9 @@
           + (window.PACE_STATIC
             ? ' 数据只存在这台设备的浏览器里；想从电脑版搬过来，用「设置 → 导出数据包」，再到手机「设置 → 导入数据包」。'
             : ' 数据按账号存放；手机版与电脑版不互通，可用「设置 → 导出数据包 / 导入数据包」迁移。'),
-          `<div class="row" style="gap:8px;margin-top:6px">
+          `<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap;justify-content:center">
              <button class="btn btn-primary" onclick="UI.Importer.open()">${Icon.get('upload')}导入活动</button>
-             <a class="btn" href="#/settings">调整心率设置</a>
+             <a class="btn" href="#/settings">导入数据包 / 心率设置</a>
            </div>`)}
         </div>`;
       return;
