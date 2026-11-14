@@ -1410,6 +1410,13 @@ body.static-mode .nav-sub { display: flex; }
   border: 3px solid rgba(255,255,255,.15); border-top-color: #ff7a3d;
   animation: py-spin 0.9s linear infinite; }
 @keyframes py-spin { to { transform: rotate(360deg); } }
+.py-boot-bar { width: 220px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.12);
+  overflow: hidden; }
+.py-boot-bar i { display: block; height: 100%; width: 0; border-radius: 3px;
+  background: linear-gradient(90deg, #ff8a52, #ff6a2b); transition: width .5s ease; }
+.py-boot-err { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(248,113,113,.18); color: #f87171; font-weight: 700; font-size: 18px; }
+.py-boot-retry { margin-top: 10px; }
 
 /* ── 账号页（登录 / 注册 / 找回密码）──────────────────────── */
 .auth-gate { position: fixed; inset: 0; z-index: 1000; background: #f6f7fb; font-size: 15px; }

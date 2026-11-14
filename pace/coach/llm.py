@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -148,6 +149,44 @@ def build_context(store, report: dict, intake: dict | None = None,
 
 # ---------------------------------------------------------------- 调用
 
+class _HttpStatus(Exception):
+    """非 2xx 响应（和 urllib.error.HTTPError 一样带 code，方便复用 _friendly）。"""
+
+    def __init__(self, code: int, text: str):
+        super().__init__(f"HTTP {code}: {text[:200]}")
+        self.code = code
+        self.body = text
+
+
+def _in_browser() -> bool:
+    return "pyodide" in sys.modules
+
+
+def _post_raw(url: str, body: bytes, headers: dict, timeout: float) -> tuple[int, str]:
+    """POST 并返回 (status, text)。浏览器里用同步 XHR（Pyodide 没有 socket）。"""
+    if _in_browser():
+        from js import XMLHttpRequest  # type: ignore[import-not-found]
+        xhr = XMLHttpRequest.new()
+        # 同步模式：Pyodide 跑在主线程，异步 fetch 没法在同步函数里等
+        xhr.open("POST", url, False)
+        # 同步 XHR 不允许设置 timeout（浏览器会直接抛错）；超时交给浏览器默认行为
+        try:
+            xhr.timeout = int(timeout * 1000)
+        except Exception:  # noqa: BLE001
+            pass
+        for key, value in headers.items():
+            xhr.setRequestHeader(key, value)
+        xhr.send(body)
+        return int(xhr.status), str(xhr.responseText or "")
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            return int(resp.status), resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return int(exc.code), exc.read().decode("utf-8", "replace")
+
+
 def _post_chat(cfg: dict, messages: list[dict], *, timeout: float | None = None) -> dict:
     body = json.dumps({
         "model": cfg["model"],
@@ -156,19 +195,18 @@ def _post_chat(cfg: dict, messages: list[dict], *, timeout: float | None = None)
         "max_tokens": 800,
         "stream": False,
     }).encode("utf-8")
-    req = urllib.request.Request(
+    status, text = _post_raw(
         cfg["base_url"] + "/chat/completions",
-        data=body,
-        headers={
+        body,
+        {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {cfg['api_key']}",
         },
-        method="POST",
+        timeout or cfg["timeout"],
     )
-    # 不走系统代理：本机 Privoxy 之类会把请求变成 500
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(req, timeout=timeout or cfg["timeout"]) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    if not (200 <= status < 300):
+        raise _HttpStatus(status, text)
+    return json.loads(text)
 
 
 def _extract(payload: dict) -> str:
@@ -225,6 +263,8 @@ def ask(store, report: dict, question: str, intake: dict | None = None,
 
 
 def _friendly(exc: Exception) -> str:
+    if isinstance(exc, _HttpStatus):
+        return _friendly_http_code(exc.code)
     if isinstance(exc, urllib.error.HTTPError):
         if exc.code == 401:
             return "API Key 无效（401）"
@@ -238,6 +278,18 @@ def _friendly(exc: Exception) -> str:
     if isinstance(exc, TimeoutError):
         return "请求超时"
     return str(exc)[:120]
+
+
+def _friendly_http_code(code: int) -> str:
+    if code == 401:
+        return "API Key 无效（401）"
+    if code == 402:
+        return "账户余额不足（402）"
+    if code == 429:
+        return "请求太频繁（429）"
+    if code in (403, 404):
+        return f"接口拒绝或路径不对（{code}）"
+    return f"接口返回 {code}"
 
 
 def test_connection(settings: dict) -> dict:

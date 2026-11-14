@@ -21,8 +21,7 @@ __pycache__/
 *.pyc
 
 # ── 浏览器 / 前端运行时 ────────────────────────────────────────────
-.edge-profile*/
-.edge-e2e/
+.edge-*/
 .pnpm-store/
 node_modules/
 

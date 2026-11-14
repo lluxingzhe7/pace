@@ -1,5 +1,6 @@
 /* 离线壳：静态资源缓存优先，接口请求不拦截（走 Pyodide） */
-const CACHE = 'pace-shell-v1';
+const CACHE = 'pace-shell-v3';
+const CDN_CACHE = 'pace-cdn-v1';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './favicon.svg',
   './css/app.css',
@@ -25,7 +26,16 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.pathname.startsWith('/api/')) return;            // 接口由 Pyodide 处理
-  if (url.origin !== location.origin) return;              // CDN 交给浏览器缓存
+  // Pyodide 运行时（约 9 MB）单独缓存，第二次打开就不用再下
+  if (/(^|\.)jsdelivr\.net$/.test(url.hostname)) {
+    event.respondWith(caches.open(CDN_CACHE).then(cache =>
+      cache.match(event.request).then(hit => hit || fetch(event.request).then(res => {
+        if (res && (res.ok || res.type === 'opaque')) cache.put(event.request, res.clone());
+        return res;
+      }))));
+    return;
+  }
+  if (url.origin !== location.origin) return;
   event.respondWith(
     caches.match(event.request).then(hit => hit || fetch(event.request).then(res => {
       const copy = res.clone();

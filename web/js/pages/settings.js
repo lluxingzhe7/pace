@@ -83,7 +83,7 @@
 
         <div class="card" style="grid-column:1/-1">
           <div class="card-head"><h3>AI 教练（DeepSeek / OpenAI 兼容）</h3>
-            <span class="dim">${s.llm_api_key_set ? "已配置" : "未配置，教练走本地规则引擎"}</span></div>
+            <span class="dim">${s.llm_api_key_set ? "已配置" : "未配置，教练走本地规则引擎"}${isStatic ? " · Key 只存本机浏览器" : ""}</span></div>
           <div class="card-body">
             <div class="grid g-4">
               <label class="tiny dim">API Key

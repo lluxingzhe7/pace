@@ -26,6 +26,11 @@ jobs:
           python-version: "3.12"
       - name: 重新打包 Python 引擎
         run: python tools/build_web_bundle.py
+      - name: 注入版本号（Service Worker 缓存失效）
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          sed -i "s/pace-shell-v[0-9a-f]*/pace-shell-${SHA}/" web/sw.js
+          grep -o "pace-shell-[0-9a-f]*" web/sw.js | head -1
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

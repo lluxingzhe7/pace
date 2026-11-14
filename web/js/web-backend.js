@@ -69,7 +69,7 @@
     return btoa(bin);
   }
 
-  function overlay(text) {
+  function overlay(text, pct, opts) {
     let el = document.getElementById('pyBoot');
     if (!el) {
       el = document.createElement('div');
@@ -77,11 +77,18 @@
       el.className = 'py-boot';
       document.body.appendChild(el);
     }
+    const o = opts || {};
+    const percent = Math.max(0, Math.min(100, Math.round(pct || 0)));
     el.innerHTML = '<div class="py-boot-card">' +
-      '<div class="py-boot-spin"></div>' +
-      '<b>正在加载分析引擎</b>' +
-      '<span>' + (text || '首次打开要下载约 10 MB，之后会缓存') + '</span></div>';
+      (o.error ? '<div class="py-boot-err">!</div>' : '<div class="py-boot-spin"></div>') +
+      '<b>' + (o.error ? '加载失败' : '正在加载分析引擎') + '</b>' +
+      '<div class="py-boot-bar"><i style="width:' + percent + '%"></i></div>' +
+      '<span>' + (text || '首次打开要下载约 10 MB，之后会缓存') + '</span>' +
+      (o.error ? '<button class="btn btn-sm py-boot-retry" id="pyRetry">重试</button>' : '') +
+      '</div>';
     el.hidden = false;
+    const retry = document.getElementById('pyRetry');
+    if (retry) retry.addEventListener('click', () => location.reload());
   }
 
   function hideOverlay() {
@@ -107,14 +114,16 @@
     if (state.ready) return true;
     if (state.booting) return state.booting;
     state.booting = (async () => {
-      overlay('准备运行时…');
+      const t0 = Date.now();
+      overlay('① 下载 Python 运行时（约 9 MB）…', 8);
       await ensurePyodide();
+      overlay('② 启动 Python 运行时…', 22);
       const py = await window.loadPyodide({ indexURL: PYODIDE_CDN });
       // sqlite3 在 Pyodide 里是「未内置」的包，要显式加载
-      overlay('加载数据库引擎…');
+      overlay('③ 加载数据库引擎 sqlite3…', 55);
       await py.loadPackage(['sqlite3']);
       state.py = py;
-      overlay('解包引擎…');
+      overlay('④ 下载 PACE 引擎（约 160 KB）…', 70);
       const zipResp = await rawFetch('py/pace.zip', { cache: 'no-cache' });
       if (!zipResp.ok) throw new Error('pace.zip 下载失败: ' + zipResp.status);
       const zip = new Uint8Array(await zipResp.arrayBuffer());
@@ -123,7 +132,7 @@
       py.runPython("import zipfile; zipfile.ZipFile('/tmp/pace.zip').extractall('/home/pyodide')");
       window.__py = py;
 
-      overlay('恢复本地数据…');
+      overlay('⑤ 恢复本地数据…', 92);
       py.runPython("import os\nos.makedirs('/data', exist_ok=True)");
       const saved = await idbGet('db');
       if (saved && saved.byteLength) {
@@ -135,11 +144,12 @@
       installFetchShim();
       state.ready = true;
       hideOverlay();
+      console.log('[PACE] 引擎就绪，用时 ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒');
       window.dispatchEvent(new CustomEvent('pace:backend-ready'));
       return true;
     })().catch((err) => {
       state.booting = null;
-      overlay('加载失败：' + err.message);
+      overlay(err.message || '未知错误', 0, { error: true });
       throw err;
     });
     return state.booting;
